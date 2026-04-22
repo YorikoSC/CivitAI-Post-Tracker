@@ -12,7 +12,7 @@
     "start_mode": "post_id",
     "start_post_id": null,
     "start_date": null,
-    "poll_minutes": 15
+    "poll_minutes": 15 #Used for external scheduling guidance. Does not schedule runs by itself.
   },
   "api": {
     "mode": "red",
