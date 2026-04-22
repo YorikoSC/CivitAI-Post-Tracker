@@ -104,32 +104,6 @@ To update it automatically, use an external scheduler such as:
 - Never commit generated local databases or CSV files
 - Never commit your generated `dashboard.html` if it contains personal data or private analytics
 
-## Repository hygiene
-
-Before creating a public release:
-
-- verify that `config.example.json` contains only placeholders
-- remove local DB files, CSV exports, and generated HTML
-- make sure `.gitignore` is present
-- create a GitHub release from a clean working tree
-
-## Suggested repository structure
-
-```text
-civitai-post-tracker/
-├─ tracker_v8_2.py
-├─ setup_config.py
-├─ config_utils.py
-├─ config.example.json
-├─ requirements.txt
-├─ run_tracker_v8_2.bat
-├─ README.md
-├─ DASHBOARD_GUIDE.md
-├─ CHANGELOG.md
-├─ LICENSE
-└─ .gitignore
-```
-
 ## License
 
 MIT for public distribution.
