@@ -66,7 +66,7 @@ Use `config.example.json` as a template only.
 - `tracking.start_mode` — `post_id` or `date`
 - `tracking.start_post_id` — tracking start post ID
 - `tracking.start_date` — tracking start date in `YYYY-MM-DD`
-- `tracking.poll_minutes` — intended polling interval for external schedulers
+- `tracking.poll_minutes` — intended polling interval for external schedulers. ATM it's used for external scheduling guidance. Does not schedule runs by itself.
 - `api.mode` — recommended value: `red`
 - `api.view_host` — recommended value: `https://civitai.red`
 - `api.nsfw_level` — recommended value: `X`
