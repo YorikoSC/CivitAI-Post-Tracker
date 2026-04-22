@@ -132,4 +132,4 @@ civitai-post-tracker/
 
 ## License
 
-A permissive license such as MIT is recommended for public distribution.
+MIT for public distribution.
