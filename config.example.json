@@ -1,0 +1,30 @@
+{
+  "profile": {
+    "username": "",
+    "display_name": "",
+    "timezone": "UTC"
+  },
+  "auth": {
+    "api_key": "",
+    "api_key_file": "api_key.txt"
+  },
+  "tracking": {
+    "start_mode": "post_id",
+    "start_post_id": null,
+    "start_date": null,
+    "poll_minutes": 15
+  },
+  "api": {
+    "mode": "red",
+    "view_host": "https://civitai.red",
+    "nsfw_level": "X"
+  },
+  "paths": {
+    "db": "civitai_tracker.db",
+    "csv_dir": "csv",
+    "html": "dashboard.html"
+  },
+  "options": {
+    "allow_rest_fallback": false
+  }
+}
