@@ -1,26 +1,32 @@
-# CivitAI Post Tracker
+# CivitAI Tracker v8.8
 
-A local self-hosted tracker for CivitAI post analytics.
+A local desktop utility for tracking CivitAI post performance, generating CSV exports, and updating a local dashboard.
 
-This project collects post-level statistics from CivitAI and generates a local HTML dashboard with historical tracking, daily reaction summaries, best-performing posts, and suggested posting windows.
+## What is new in v8.8
 
-## Features
+- Dashboard analytics tables now use a cleaner **single-column flow**
+- Detailed analytics blocks are rendered as **collapsible sections** to reduce visual noise
+- Open `dashboard.html` now **auto-refreshes every 60 seconds** while viewed in a browser
+- Runtime status cards remain visible alongside the post analytics overview
+- `launch_tracker.vbs` remains the main user launcher for the desktop app
+- Windows autostart still uses the VBS launcher flow
 
-- Tracks **posts**, not just individual images
-- Uses **tRPC `post.getInfinite`** as the primary source
-- Supports tracking start from:
-  - a **post ID / post URL**
-  - or a **start date**
-- Stores history in **SQLite**
-- Exports **CSV**
-- Builds a local **`dashboard.html`**
-- Supports **`civitai.red`** as the recommended primary host
-- Includes a setup wizard for first-time configuration
+
+## Core behavior
+
+The tracker uses a one-shot collection core and a desktop runner:
+
+- `tracker_core.py` performs one data collection run
+- `tracker_runner.py` handles repeated polling
+- `tracker_app.py` provides the desktop UI
+
+This keeps the data collection logic simple while giving the user a friendlier always-on app.
 
 ## Requirements
 
 - Python 3.11+
 - A valid CivitAI API key
+- Windows is the primary target for the desktop launcher flow
 
 ## Quick start
 
@@ -30,80 +36,97 @@ This project collects post-level statistics from CivitAI and generates a local H
 python -m pip install -r requirements.txt
 ```
 
-2. Run the setup wizard:
-
-```powershell
-python setup_config.py
-```
-
-3. If you selected file-based API key storage, create `api_key.txt` and put your API key there as a single line.
-
-4. Run the tracker:
-
-```powershell
-python tracker_v8_2.py
-```
-
-Or use:
+2. Start the app by double-clicking:
 
 ```text
-run_tracker_v8_2.bat
+launch_tracker.vbs
 ```
 
-## Configuration
+If `config.json` does not exist yet, the app opens the settings flow.
 
-The project uses a local `config.json` file created by the setup wizard.
+## Main launch options
 
-Do not share your personal `config.json` or `api_key.txt`.
+### Recommended desktop mode
 
-Use `config.example.json` as a template only.
+Double-click:
 
-## Main config fields
-
-- `profile.username` — your CivitAI username
-- `profile.display_name` — optional friendly display name for the dashboard
-- `profile.timezone` — your IANA timezone, for example `Europe/Moscow`
-- `tracking.start_mode` — `post_id` or `date`
-- `tracking.start_post_id` — tracking start post ID
-- `tracking.start_date` — tracking start date in `YYYY-MM-DD`
-- `tracking.poll_minutes` — intended polling interval for external schedulers. ATM it's used for external scheduling guidance. Does not schedule runs by itself.
-- `api.mode` — recommended value: `red`
-- `api.view_host` — recommended value: `https://civitai.red`
-- `api.nsfw_level` — recommended value: `X`
-
-## Recommended host mode
-
-Because `civitai.com` may exclude content above PG-13, the recommended mode for full tracking is:
-
-```json
-"mode": "red"
+```text
+launch_tracker.vbs
 ```
 
-## Output files
+This launches the app without a visible console window.
 
-After a successful run, the tracker generates:
+### Development / debug mode
 
-- a SQLite database
+Run directly:
+
+```powershell
+python tracker_app.py
+```
+
+This is useful for debugging, but if you close the console window you also close the app.
+
+### Compatibility launcher
+
+`run_tracker_v8_5.bat` still exists, but it now just forwards to the VBS launcher.
+
+## Timezone format
+
+The app expects an **IANA timezone name**, for example:
+
+- `Europe/Moscow`
+- `Europe/Berlin`
+- `America/New_York`
+- `Asia/Tokyo`
+- `UTC`
+
+The desktop UI validates this before saving.
+
+## Tray behavior
+
+- Closing the window sends the app to the tray
+- Auto polling continues while the app is hidden
+- Use the tray menu to:
+  - open the app
+  - run a collection now
+  - start or stop auto polling
+  - open the dashboard
+  - exit fully
+
+## Output
+
+A successful run updates:
+
+- SQLite database
 - CSV exports
 - `dashboard.html`
+- log files in `logs/`
 
-## Running on a schedule
+## Notes
 
-The tracker performs a **single collection run** and exits.
+- Recommended API mode for full visibility: `red`
+- `poll_minutes` controls the built-in app polling interval
+- The app creates the external API key file automatically when file-based storage is selected
+- `Launch with Windows` starts the app through the VBS-based launcher flow
+- For a true set-and-forget mode, enable all three: `Launch with Windows`, `Start minimized to tray`, and `Start auto polling on launch`
 
-To update it automatically, use an external scheduler such as:
+## EXE packaging
 
-- Windows Task Scheduler
-- `cron`
-- `systemd` timer
+A basic PyInstaller build flow is included.
 
-## Security notes
+See:
 
-- Never publish your `config.json`
-- Never publish your `api_key.txt`
-- Never commit generated local databases or CSV files
-- Never commit your generated `dashboard.html` if it contains personal data or private analytics
+```text
+EXE_BUILD.md
+```
 
-## License
+and run:
 
-MIT for public distribution.
+```text
+build_exe.bat
+```
+
+
+## Dashboard refresh
+
+The generated `dashboard.html` now refreshes itself every 60 seconds while open in a browser. You can also use the **Refresh now** button in the page header.
