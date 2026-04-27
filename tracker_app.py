@@ -28,11 +28,17 @@ from config_utils import (
     default_config,
     deep_get,
     ensure_example_copied_if_missing,
+    format_startup_self_check,
+    get_app_base_dir,
+    get_execution_mode,
+    get_runtime_data_dir,
     is_valid_timezone_name,
     load_json_config,
     materialize_api_key,
+    run_startup_self_check,
     save_json_config,
     set_windows_autostart,
+    startup_check_summary,
     timezone_error_message,
     validate_config,
 )
@@ -416,6 +422,40 @@ class SettingsDialog(tk.Toplevel):
         self.on_save(cfg)
         self.destroy()
 
+class DiagnosticsDialog(tk.Toplevel):
+    def __init__(self, master: tk.Misc, report: dict):
+        super().__init__(master)
+        self.title("Diagnostics")
+        self.geometry("820x620")
+        self.minsize(720, 520)
+        self.report = report
+
+        wrapper = ttk.Frame(self, padding=14)
+        wrapper.pack(fill="both", expand=True)
+        ttk.Label(wrapper, text="Startup diagnostics", font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        ttk.Label(wrapper, text=startup_check_summary(report)).pack(anchor="w", pady=(4, 10))
+
+        self.text = ScrolledText(wrapper, wrap="word")
+        self.text.pack(fill="both", expand=True)
+        self.text.insert("1.0", format_startup_self_check(report))
+        self.text.configure(state="disabled")
+
+        buttons = ttk.Frame(wrapper)
+        buttons.pack(fill="x", pady=(10, 0))
+        ttk.Button(buttons, text="Copy to clipboard", command=self._copy).pack(side="left")
+        ttk.Button(buttons, text="Close", command=self.destroy).pack(side="right")
+
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _copy(self):
+        text = format_startup_self_check(self.report)
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self.update_idletasks()
+
+
 class TrackerApp(tk.Tk):
     def __init__(self, minimized: bool = False):
         super().__init__()
@@ -423,11 +463,14 @@ class TrackerApp(tk.Tk):
         self.geometry("980x700")
         self.minsize(920, 620)
         self.configure(bg=APP_BG)
-        self.base_dir = Path(__file__).resolve().parent
-        ensure_example_copied_if_missing(self.base_dir)
-        self.config_path = self.base_dir / "config.json"
+        self.bundle_dir = get_app_base_dir(__file__)
+        self.runtime_dir = get_runtime_data_dir(__file__)
+        self.base_dir = self.runtime_dir
+        ensure_example_copied_if_missing(self.runtime_dir, self.bundle_dir)
+        self.config_path = self.runtime_dir / "config.json"
         self.log_queue: queue.Queue[str] = queue.Queue()
-        self.runner = TrackerRunner(self.base_dir, "config.json", log_callback=self._enqueue_log)
+        self.runner = TrackerRunner(self.runtime_dir, "config.json", log_callback=self._enqueue_log)
+        self.last_diagnostics_report: dict | None = None
         self.tray_icon = None
         self._closing_to_tray = True
         self._build_ui()
@@ -435,10 +478,11 @@ class TrackerApp(tk.Tk):
         self.after(1000, self._refresh_status)
 
         self.config_data = load_json_config(self.config_path) if self.config_path.exists() else default_config()
+        self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
         if deep_get(self.config_data, "options.launch_with_windows", False):
             set_windows_autostart(
                 True,
-                self.base_dir,
+                self.bundle_dir,
                 start_minimized=bool(deep_get(self.config_data, "options.start_minimized", False)),
             )
 
@@ -447,6 +491,8 @@ class TrackerApp(tk.Tk):
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.runner.set_app_mode("window")
+        self._enqueue_log(f"Running in {get_execution_mode()} mode.")
+        self._apply_startup_diagnostics(bool(minimized or deep_get(self.config_data, "options.start_minimized", False)))
 
         launch_hidden = bool(minimized or deep_get(self.config_data, "options.start_minimized", False))
         if launch_hidden:
@@ -544,6 +590,7 @@ class TrackerApp(tk.Tk):
         self.dashboard_btn = ttk.Button(actions, text="Open dashboard", command=self.open_dashboard)
         self.data_btn = ttk.Button(actions, text="Open data folder", command=self.open_data_folder)
         self.logs_btn = ttk.Button(actions, text="Open logs", command=self.open_logs)
+        self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics)
         self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray)
 
         buttons = [
@@ -554,6 +601,7 @@ class TrackerApp(tk.Tk):
             self.dashboard_btn,
             self.data_btn,
             self.logs_btn,
+            self.diagnostics_btn,
             self.tray_btn,
         ]
         for i, btn in enumerate(buttons):
@@ -566,6 +614,7 @@ class TrackerApp(tk.Tk):
             "Auto polling keeps running while the app is hidden in the tray.",
             "Timezone must use IANA format, for example Europe/Moscow or America/New_York.",
             "Use API mode 'red' if you want full visibility for content above PG-13.",
+            "Use Diagnostics if startup, config, or write-path issues are suspected.",
         ]
         for line in notes:
             tk.Label(card, text="• " + line, bg=CARD_BG, fg=SUBTEXT_FG, anchor="w", justify="left", wraplength=860).pack(fill="x", pady=2)
@@ -663,19 +712,41 @@ class TrackerApp(tk.Tk):
 
     def open_dashboard(self):
         cfg = load_json_config(self.config_path) if self.config_path.exists() else default_config()
-        html_path = self.base_dir / deep_get(cfg, "paths.html", "dashboard.html")
+        html_path = self.runtime_dir / deep_get(cfg, "paths.html", "dashboard.html")
         if not html_path.exists():
             messagebox.showinfo("Dashboard", f"Dashboard file not found:\n{html_path}")
             return
         webbrowser.open(html_path.resolve().as_uri())
 
     def open_data_folder(self):
-        self._open_path(self.base_dir)
+        self._open_path(self.runtime_dir)
 
     def open_logs(self):
-        logs_dir = self.base_dir / "logs"
+        logs_dir = self.runtime_dir / "logs"
         logs_dir.mkdir(exist_ok=True)
         self._open_path(logs_dir)
+
+    def open_diagnostics(self):
+        report = self.last_diagnostics_report or run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
+        self.last_diagnostics_report = report
+        DiagnosticsDialog(self, report)
+
+    def _apply_startup_diagnostics(self, hidden_launch: bool):
+        report = self.last_diagnostics_report or {}
+        if not report:
+            return
+        summary = startup_check_summary(report)
+        self._enqueue_log(summary)
+        for item in report.get("critical", []):
+            self._enqueue_log(f"CRITICAL: {item}")
+        for item in report.get("warnings", []):
+            self._enqueue_log(f"Warning: {item}")
+        if report.get("critical_count", 0) and not hidden_launch:
+            self.after(900, lambda: messagebox.showwarning(
+                "Startup self-check",
+                summary + "\n\nOpen Diagnostics for details.",
+                parent=self,
+            ))
 
     def _open_path(self, path: Path):
         try:
@@ -693,7 +764,9 @@ class TrackerApp(tk.Tk):
 
         def on_save(cfg):
             self.config_data = cfg
+            self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
             self._enqueue_log("Configuration saved.")
+            self._enqueue_log(startup_check_summary(self.last_diagnostics_report))
             if deep_get(cfg, "options.launch_with_windows", False):
                 self._enqueue_log("Windows autostart enabled.")
             else:
@@ -703,7 +776,7 @@ class TrackerApp(tk.Tk):
             else:
                 self._enqueue_log("Auto polling on launch is disabled.")
 
-        SettingsDialog(self, self.base_dir, current, on_save)
+        SettingsDialog(self, self.runtime_dir, current, on_save)
 
     def _create_tray_image(self):
         image = Image.new("RGB", (64, 64), color=(17, 19, 23))
@@ -732,6 +805,7 @@ class TrackerApp(tk.Tk):
                 pystray.MenuItem("Start auto polling", lambda icon, item: self.after(0, self.start_auto)),
                 pystray.MenuItem("Stop auto polling", lambda icon, item: self.after(0, self.stop_auto)),
                 pystray.MenuItem("Open dashboard", lambda icon, item: self.after(0, self.open_dashboard)),
+                pystray.MenuItem("Diagnostics", lambda icon, item: self.after(0, self.open_diagnostics)),
                 pystray.MenuItem("Exit", lambda icon, item: self.after(0, self.exit_app)),
             )
             self.tray_icon = pystray.Icon("civitai_tracker", self._create_tray_image(), "CivitAI Tracker", menu)

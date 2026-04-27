@@ -1,0 +1,17 @@
+config.json
+api_key.txt
+*.db
+*.sqlite
+csv/
+dashboard.html
+runtime_status.json
+logs/
+probe_results/
+__pycache__/
+*.pyc
+.venv/
+venv/
+dist/
+build/
+app.log
+core_last.log

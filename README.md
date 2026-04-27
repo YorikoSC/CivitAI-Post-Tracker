@@ -1,34 +1,30 @@
-# CivitAI Tracker v8.8
+# CivitAI Tracker v9
 
-A local desktop utility for tracking CivitAI post performance, generating CSV exports, and updating a local dashboard.
+A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
-## What is new in v8.8
+## Current state
 
-- Dashboard analytics tables now use a cleaner **single-column flow**
-- Detailed analytics blocks are rendered as **collapsible sections** to reduce visual noise
-- Open `dashboard.html` now **auto-refreshes every 60 seconds** while viewed in a browser
-- Runtime status cards remain visible alongside the post analytics overview
-- `launch_tracker.vbs` remains the main user launcher for the desktop app
-- Windows autostart still uses the VBS launcher flow
+This repository includes:
 
-
-## Core behavior
-
-The tracker uses a one-shot collection core and a desktop runner:
-
-- `tracker_core.py` performs one data collection run
-- `tracker_runner.py` handles repeated polling
-- `tracker_app.py` provides the desktop UI
-
-This keeps the data collection logic simple while giving the user a friendlier always-on app.
+- desktop app with tray support
+- autonomous background polling
+- runtime diagnostics
+- source mode launcher via PowerShell
+- EXE build flow via PyInstaller (`onedir`)
+- dashboard with:
+  - runtime status cards
+  - daily reaction summaries
+  - best-post blocks
+  - suggested posting windows
+  - collapsible analytics sections
 
 ## Requirements
 
 - Python 3.11+
+- Windows is the primary target
 - A valid CivitAI API key
-- Windows is the primary target for the desktop launcher flow
 
-## Quick start
+## Quick start (source mode)
 
 1. Install dependencies:
 
@@ -36,97 +32,85 @@ This keeps the data collection logic simple while giving the user a friendlier a
 python -m pip install -r requirements.txt
 ```
 
-2. Start the app by double-clicking:
+2. Run the setup/config flow:
+- either start the app and save settings there
+- or use the existing setup helper if you prefer
 
-```text
-launch_tracker.vbs
-```
-
-If `config.json` does not exist yet, the app opens the settings flow.
-
-## Main launch options
-
-### Recommended desktop mode
-
-Double-click:
-
-```text
-launch_tracker.vbs
-```
-
-This launches the app without a visible console window.
-
-### Development / debug mode
-
-Run directly:
+3. Launch the app:
 
 ```powershell
-python tracker_app.py
+.\launch_tracker.ps1
 ```
 
-This is useful for debugging, but if you close the console window you also close the app.
+## Quick start (EXE mode)
 
-### Compatibility launcher
+1. Build the EXE:
 
-`run_tracker_v8_5.bat` still exists, but it now just forwards to the VBS launcher.
-
-## Timezone format
-
-The app expects an **IANA timezone name**, for example:
-
-- `Europe/Moscow`
-- `Europe/Berlin`
-- `America/New_York`
-- `Asia/Tokyo`
-- `UTC`
-
-The desktop UI validates this before saving.
-
-## Tray behavior
-
-- Closing the window sends the app to the tray
-- Auto polling continues while the app is hidden
-- Use the tray menu to:
-  - open the app
-  - run a collection now
-  - start or stop auto polling
-  - open the dashboard
-  - exit fully
-
-## Output
-
-A successful run updates:
-
-- SQLite database
-- CSV exports
-- `dashboard.html`
-- log files in `logs/`
-
-## Notes
-
-- Recommended API mode for full visibility: `red`
-- `poll_minutes` controls the built-in app polling interval
-- The app creates the external API key file automatically when file-based storage is selected
-- `Launch with Windows` starts the app through the VBS-based launcher flow
-- For a true set-and-forget mode, enable all three: `Launch with Windows`, `Start minimized to tray`, and `Start auto polling on launch`
-
-## EXE packaging
-
-A basic PyInstaller build flow is included.
-
-See:
-
-```text
-EXE_BUILD.md
-```
-
-and run:
-
-```text
+```powershell
 build_exe.bat
 ```
 
+2. Open the generated folder:
 
-## Dashboard refresh
+```text
+dist\CivitAITracker
+```
 
-The generated `dashboard.html` now refreshes itself every 60 seconds while open in a browser. You can also use the **Refresh now** button in the page header.
+3. Run:
+
+```text
+CivitAITracker.exe
+```
+
+On first launch, open **Settings**, save your configuration, then use **Diagnostics** to confirm the environment is healthy.
+
+## Recommended autonomous mode
+
+For a mostly hands-off workflow:
+
+- **Launch with Windows** = enabled
+- **Start minimized to tray** = enabled
+- **Start auto polling on launch** = enabled
+
+## Main files
+
+- `tracker_app.py` — desktop UI
+- `tracker_runner.py` — polling loop and runtime orchestration
+- `tracker_service.py` — one-shot collection service
+- `tracker_core.py` — thin CLI wrapper around the service layer
+- `config_utils.py` — config, paths, startup helpers
+- `launch_tracker.ps1` — source-mode launcher
+- `build_exe.bat` — PyInstaller build helper
+
+## Diagnostics
+
+The app includes a **Diagnostics** view that checks:
+
+- execution mode (`source` / `frozen`)
+- Python version
+- config presence
+- username/API key availability
+- writable paths for runtime data, logs, DB, and dashboard
+
+## Notes
+
+- `civitai.red` is the recommended source mode for full visibility above PG-13.
+- Personal files such as `config.json`, `api_key.txt`, databases, logs, CSV exports, and generated dashboards are intentionally excluded from the repository package.
+- VBS is no longer treated as the main launcher strategy.
+
+## Repository hygiene
+
+Do not commit:
+
+- `config.json`
+- `api_key.txt`
+- `*.db`
+- `csv/`
+- `dashboard.html`
+- `runtime_status.json`
+- `logs/`
+
+## Next planned investigation
+
+See `BUZZ_COLLECTIONS_B1_SPEC.md` for the next research track:
+**Buzz / collections event probing**.

@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
-import subprocess
-import sys
 import threading
 import time
 from dataclasses import dataclass, field
@@ -12,6 +9,7 @@ from pathlib import Path
 from typing import Callable, Optional
 
 from config_utils import deep_get, load_json_config, validate_config
+from tracker_service import refresh_dashboard_from_config, run_collection_once
 
 LogCallback = Callable[[str], None]
 
@@ -36,7 +34,6 @@ class TrackerRunner:
     def __init__(self, base_dir: str | Path = ".", config_path: str = "config.json", log_callback: Optional[LogCallback] = None):
         self.base_dir = Path(base_dir).resolve()
         self.config_path = str((self.base_dir / config_path).resolve())
-        self.core_script = self.base_dir / "tracker_core.py"
         self.log_callback = log_callback
         self.runtime_status_path = self.base_dir / "runtime_status.json"
         self.state = RunnerState(app_started_at=datetime.now())
@@ -54,6 +51,27 @@ class TrackerRunner:
         with (logs_dir / "app.log").open("a", encoding="utf-8") as f:
             f.write(line + "\n")
 
+    def _write_core_log(self, result: dict) -> None:
+        logs_dir = self.base_dir / "logs"
+        logs_dir.mkdir(exist_ok=True)
+        payload = {
+            "ok": bool(result.get("ok")),
+            "error": result.get("error", ""),
+            "selected_host": result.get("selected_host", ""),
+            "dashboard_path": result.get("dashboard_path", ""),
+            "db_path": result.get("db_path", ""),
+            "posts_tracked": result.get("posts_tracked", 0),
+            "changed_posts": result.get("changed_posts", 0),
+            "known_totals": result.get("known_totals", 0),
+            "unknown_totals": result.get("unknown_totals", 0),
+            "captured_at": result.get("captured_at", ""),
+            "image_rows": result.get("image_rows", 0),
+            "image_source": result.get("image_source", ""),
+        }
+        with (logs_dir / "core_last.log").open("w", encoding="utf-8") as f:
+            json.dump(payload, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+
     def _read_poll_minutes(self) -> int:
         cfg = load_json_config(self.config_path)
         poll = deep_get(cfg, "tracking.poll_minutes", 15)
@@ -70,14 +88,17 @@ class TrackerRunner:
     def _to_iso(self, value: Optional[datetime]) -> str | None:
         return value.replace(microsecond=0).isoformat() if value else None
 
-    def _extract_selected_host(self, text: str) -> str:
-        match = re.search(r"host=(https?://[^\s]+)", text or "")
-        return match.group(1) if match else ""
+    def _parse_iso_dt(self, value: str | None) -> Optional[datetime]:
+        if not value:
+            return None
+        try:
+            return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+        except Exception:
+            return None
 
     def _refresh_dashboard_status(self) -> None:
         try:
-            import tracker_core
-            tracker_core.refresh_dashboard_from_config(self.config_path)
+            refresh_dashboard_from_config(self.config_path)
         except Exception as exc:
             self._log(f"Dashboard refresh skipped: {exc}")
 
@@ -121,55 +142,35 @@ class TrackerRunner:
         self._persist_runtime_status(refresh_dashboard=True)
 
         try:
-            if not self.core_script.exists():
-                raise FileNotFoundError(f"tracker_core.py not found in {self.base_dir}")
-
             cfg = load_json_config(self.config_path)
             errors = validate_config(cfg)
             if errors:
                 raise ValueError("Invalid config: " + "; ".join(errors))
 
-            logs_dir = self.base_dir / "logs"
-            logs_dir.mkdir(exist_ok=True)
-
-            cmd = [sys.executable, str(self.core_script), "--config", self.config_path]
-            self._log(f"Starting collection: {' '.join(cmd)}")
-            result = subprocess.run(
-                cmd,
-                cwd=str(self.base_dir),
-                capture_output=True,
-                text=True,
-                timeout=1800,
-            )
-
-            core_log = logs_dir / "core_last.log"
-            with core_log.open("w", encoding="utf-8") as f:
-                if result.stdout:
-                    f.write("=== STDOUT ===\n")
-                    f.write(result.stdout)
-                    if not result.stdout.endswith("\n"):
-                        f.write("\n")
-                if result.stderr:
-                    f.write("=== STDERR ===\n")
-                    f.write(result.stderr)
-                    if not result.stderr.endswith("\n"):
-                        f.write("\n")
+            self._log("Starting collection via tracker_service.run_collection_once")
+            result = run_collection_once(config_path=self.config_path)
+            self._write_core_log(result)
 
             with self.state.lock:
-                self.state.last_exit_code = result.returncode
-                extracted_host = self._extract_selected_host((result.stdout or "") + "\n" + (result.stderr or ""))
-                if extracted_host:
-                    self.state.selected_host = extracted_host
+                self.state.last_exit_code = 0 if result.get("ok") else 1
+                selected_host = str(result.get("selected_host", "") or "")
+                if selected_host:
+                    self.state.selected_host = selected_host
 
-            if result.returncode == 0:
+            if result.get("ok"):
+                success_dt = self._parse_iso_dt(result.get("captured_at")) or datetime.now()
                 with self.state.lock:
-                    self.state.last_success_at = datetime.now()
+                    self.state.last_success_at = success_dt
                     self.state.status = "Waiting" if self.state.auto_polling else "Idle"
-                self._log("Collection finished successfully.")
+                self._log(
+                    "Collection finished successfully. "
+                    f"host={result.get('selected_host', '')} "
+                    f"tracked_posts={result.get('posts_tracked', 0)}"
+                )
                 self._persist_runtime_status(refresh_dashboard=True)
                 return True
 
-            err = (result.stderr or result.stdout or f"Process exited with code {result.returncode}").strip()
+            err = str(result.get("error") or "Collection failed.").strip()
             with self.state.lock:
                 self.state.last_error = err
                 self.state.status = "Error"
@@ -177,17 +178,11 @@ class TrackerRunner:
             self._persist_runtime_status(refresh_dashboard=True)
             return False
 
-        except subprocess.TimeoutExpired:
-            with self.state.lock:
-                self.state.last_error = "Collection timed out after 30 minutes."
-                self.state.status = "Error"
-            self._log("Collection timed out after 30 minutes.")
-            self._persist_runtime_status(refresh_dashboard=True)
-            return False
         except Exception as exc:
             with self.state.lock:
                 self.state.last_error = str(exc)
                 self.state.status = "Error"
+                self.state.last_exit_code = 1
             self._log(f"Collection failed: {exc}")
             self._persist_runtime_status(refresh_dashboard=True)
             return False
