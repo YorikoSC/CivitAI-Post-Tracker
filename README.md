@@ -100,5 +100,4 @@ The app includes a **Diagnostics** view that checks:
 
 ## Next planned investigation
 
-See `BUZZ_COLLECTIONS_B1_SPEC.md` for the next research track:
-**Buzz / collections event probing**.
+Adding statistics for collected images and post throu buzz reward system.
