@@ -98,18 +98,6 @@ The app includes a **Diagnostics** view that checks:
 - Personal files such as `config.json`, `api_key.txt`, databases, logs, CSV exports, and generated dashboards are intentionally excluded from the repository package.
 - VBS is no longer treated as the main launcher strategy.
 
-## Repository hygiene
-
-Do not commit:
-
-- `config.json`
-- `api_key.txt`
-- `*.db`
-- `csv/`
-- `dashboard.html`
-- `runtime_status.json`
-- `logs/`
-
 ## Next planned investigation
 
 See `BUZZ_COLLECTIONS_B1_SPEC.md` for the next research track:
