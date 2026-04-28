@@ -130,6 +130,7 @@ The internal key name `enable_buzz_ingest` is kept for compatibility. User-facin
 
 ## Local data and privacy
 
+<<<<<<< HEAD
 The tracker stores runtime data locally:
 
 - `config.json`
@@ -157,3 +158,22 @@ python -c "import sqlite3; c=sqlite3.connect('civitai_tracker.db'); print(c.exec
 ```
 
 If collection tracking is empty, verify that your API key is configured and that recent collection events exist for your account.
+=======
+The app includes a **Diagnostics** view that checks:
+
+- execution mode (`source` / `frozen`)
+- Python version
+- config presence
+- username/API key availability
+- writable paths for runtime data, logs, DB, and dashboard
+
+## Notes
+
+- `civitai.red` is the recommended source mode for full visibility above PG-13.
+- Personal files such as `config.json`, `api_key.txt`, databases, logs, CSV exports, and generated dashboards are intentionally excluded from the repository package.
+- VBS is no longer treated as the main launcher strategy.
+
+## Next planned investigation
+
+Adding statistics for collected images and post throu buzz reward system.
+>>>>>>> f2932d418e4c8dd5d59d27ef248f57d27b350677
