@@ -14,6 +14,10 @@ from urllib.parse import quote, urlencode
 
 import requests
 
+from buzz_ingest import run_b2_1_ingest
+from engagement_correlation import run_b2_2_correlation
+from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section
+
 from config_utils import load_yaml_config, deep_get, choose, read_api_key
 
 try:
@@ -1052,6 +1056,7 @@ def render_dashboard(
     min_post_id: Optional[int],
     start_date: Optional[str],
     runtime_status_path: Optional[str] = None,
+    db_path: Optional[str] = None,
 ) -> None:
     current_posts = get_current_posts(conn)
     images_map = get_post_images_map(conn)
@@ -1066,6 +1071,7 @@ def render_dashboard(
     unknown_totals = tracked_posts - known_totals
     latest_capture = current_posts[0]["captured_at"] if current_posts else None
     runtime_status = load_runtime_status(runtime_status_path)
+    collections_html = render_collection_dashboard_section(db_path) if db_path else ""
 
     known_rows = [r for r in current_posts if r["stats_known"]]
     by_total_reactions = sorted(known_rows, key=lambda r: (int(r["reaction_total"] or 0), int(r["heart_count"] or 0), int(r["post_id"])), reverse=True)[:15]
@@ -1313,8 +1319,9 @@ def render_dashboard(
 
     parts: List[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>")
-    parts.append("<title>CivitAI Tracker v8.8</title>")
+    parts.append("<title>CivitAI Tracker v10.0-rc1</title>")
     parts.append(f"<style>{css}</style>")
+    parts.append(COLLECTION_SECTION_CSS)
     parts.append(
         f"<script>function refreshNow(){{location.reload();}}setInterval(function(){{location.reload();}}, {refresh_seconds*1000});"
         "document.addEventListener('DOMContentLoaded', function(){"
@@ -1329,7 +1336,7 @@ def render_dashboard(
     parts.append("</head><body><div class='wrap'>")
     parts.append(
         "<div class='hero'>"
-        f"<div><h1>CivitAI Tracker v8.8</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong></p></div>"
+        f"<div><h1>CivitAI Tracker v10.0-rc1</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong></p></div>"
         f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )
@@ -1368,6 +1375,9 @@ def render_dashboard(
     parts.append(best_post_card("Best post today", period_summary['best_today'], period_summary['today_label'], "No reaction gains captured yet for today."))
     parts.append(best_post_card("Best post this week", period_summary['best_week'], period_summary['week_label'], "No reaction gains captured yet for the last 7 days."))
     parts.append("</div>")
+
+    if collections_html:
+        parts.append(collections_html)
 
     parts.append(
         "<div class='panel table-panel' style='margin-top:18px'>"
@@ -1483,6 +1493,7 @@ def run_once(
             min_post_id=min_post_id,
             start_date=start_date,
             runtime_status_path=str(Path(runtime_status_path).resolve()) if runtime_status_path else None,
+            db_path=db_path,
         )
 
         current_posts = get_current_posts(conn)
@@ -1575,6 +1586,14 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
         "poll_minutes": poll_minutes,
         "allow_rest_fallback": bool(allow_rest_fallback),
         "api_key": api_key,
+        "api_key_file": api_key_file,
+        "enable_buzz_ingest": bool(deep_get(cfg, "options.enable_buzz_ingest", True)),
+        "buzz_account_type": deep_get(cfg, "collection_tracking.account_type", "blue"),
+        "buzz_backfill_days": deep_get(cfg, "collection_tracking.backfill_days", 60),
+        "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
+        "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
+        "mode": api_mode,
+        "host": view_host,
         "runtime_status_path": str(config_path.resolve().parent / "runtime_status.json"),
     }
 
@@ -1618,6 +1637,7 @@ def refresh_dashboard_from_config(config_path: str = "config.json") -> None:
             min_post_id=runtime["min_post_id"],
             start_date=runtime["start_date"],
             runtime_status_path=runtime["runtime_status_path"],
+            db_path=runtime["db_path"],
         )
     finally:
         conn.close()
@@ -1694,6 +1714,14 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
         "poll_minutes": poll_minutes,
         "allow_rest_fallback": allow_rest_fallback,
         "api_key": api_key,
+        "api_key_file": api_key_file,
+        "enable_buzz_ingest": bool(deep_get(cfg, "options.enable_buzz_ingest", True)),
+        "buzz_account_type": deep_get(cfg, "collection_tracking.account_type", "blue"),
+        "buzz_backfill_days": deep_get(cfg, "collection_tracking.backfill_days", 60),
+        "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
+        "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
+        "mode": api_mode,
+        "host": view_host,
         "runtime_status_path": str(config_base / "runtime_status.json"),
     }
 
@@ -1710,7 +1738,7 @@ def run_collection_once(
         else:
             runtime = resolve_runtime_config(make_default_namespace(config_path=config_path or "config.json", timeout=timeout))
 
-        result = run_once(
+        core_result = run_once(
             username=runtime["username"],
             dashboard_name=runtime["dashboard_name"],
             db_path=runtime["db_path"],
@@ -1727,20 +1755,101 @@ def run_collection_once(
             allow_rest_fallback=runtime["allow_rest_fallback"],
             runtime_status_path=runtime["runtime_status_path"],
         )
-        return {
+
+        service_result: Dict[str, Any] = {
             "ok": True,
             "error": "",
-            "selected_host": result.get("selected_host", ""),
+            "selected_host": core_result.get("selected_host", ""),
             "data_source_label": "trpc post.getInfinite",
             "dashboard_path": runtime.get("html_path", "dashboard.html"),
             "db_path": runtime.get("db_path", "civitai_tracker.db"),
-            "posts_tracked": result.get("tracked_posts", 0),
-            "changed_posts": result.get("changed_posts", 0),
-            "known_totals": result.get("known_totals", 0),
-            "unknown_totals": max(0, int(result.get("current_posts", 0) or 0) - int(result.get("known_totals", 0) or 0)),
+            "posts_tracked": core_result.get("tracked_posts", 0),
+            "changed_posts": core_result.get("changed_posts", 0),
+            "known_totals": core_result.get("known_totals", 0),
+            "unknown_totals": max(0, int(core_result.get("current_posts", 0) or 0) - int(core_result.get("known_totals", 0) or 0)),
             "captured_at": utc_now_iso(),
-            **result,
+            **core_result,
         }
+
+        engagement_enabled = bool(runtime.get("enable_buzz_ingest", True))
+        buzz_summary = {
+            "ok": False,
+            "disabled": True,
+            "reason": "API key required" if not runtime.get("api_key") else "disabled by config",
+            "events_inserted": 0,
+            "events_deduped": 0,
+            "pages_fetched": 0,
+        }
+
+        if engagement_enabled and runtime.get("api_key"):
+            try:
+                buzz_summary = run_b2_1_ingest(runtime, runtime["db_path"])
+            except Exception as exc:
+                buzz_summary = {
+                    "ok": False,
+                    "error": str(exc),
+                    "events_inserted": 0,
+                    "events_deduped": 0,
+                    "pages_fetched": 0,
+                }
+
+        service_result["collection_ingest"] = buzz_summary
+        service_result["buzz_sync"] = buzz_summary  # legacy/internal compatibility
+
+        if buzz_summary and buzz_summary.get("ok"):
+            service_result["collection_events_new"] = buzz_summary.get("events_inserted", 0)
+            service_result["collection_events_deduped"] = buzz_summary.get("events_deduped", 0)
+            service_result["collection_pages_fetched"] = buzz_summary.get("pages_fetched", 0)
+        else:
+            service_result["collection_events_new"] = 0
+            service_result["collection_events_deduped"] = 0
+            service_result["collection_pages_fetched"] = 0
+
+        correlation_summary = None
+        try:
+            correlation_summary = run_b2_2_correlation(runtime["db_path"])
+        except Exception as exc:
+            correlation_summary = {
+                "ok": False,
+                "error": str(exc),
+                "correlated_events_total": 0,
+                "distinct_images_correlated": 0,
+                "distinct_posts_correlated": 0,
+            }
+
+        service_result["engagement_correlation"] = correlation_summary
+
+        if correlation_summary and correlation_summary.get("ok"):
+            service_result["engagement_correlated_events"] = correlation_summary.get("correlated_events_total", 0)
+            service_result["engagement_distinct_images"] = correlation_summary.get("distinct_images_correlated", 0)
+            service_result["engagement_distinct_posts"] = correlation_summary.get("distinct_posts_correlated", 0)
+        else:
+            service_result["engagement_correlated_events"] = 0
+            service_result["engagement_distinct_images"] = 0
+            service_result["engagement_distinct_posts"] = 0
+
+        try:
+            conn = db_connect(runtime["db_path"])
+            try:
+                render_dashboard(
+                    conn=conn,
+                    html_path=runtime["html_path"],
+                    tz_helper=TimezoneHelper(runtime["tz_name"]),
+                    dashboard_name=runtime["dashboard_name"],
+                    view_host=runtime["view_host"],
+                    selected_host=core_result.get("selected_host", runtime.get("view_host", "https://civitai.red")),
+                    min_post_id=runtime["min_post_id"],
+                    start_date=runtime["start_date"],
+                    runtime_status_path=runtime["runtime_status_path"],
+                    db_path=runtime["db_path"],
+                )
+            finally:
+                conn.close()
+        except Exception as exc:
+            service_result["dashboard_refresh_warning"] = str(exc)
+
+        return service_result
+
     except requests.HTTPError as exc:
         return {
             "ok": False,
@@ -1767,6 +1876,7 @@ def run_collection_once(
             "unknown_totals": 0,
             "captured_at": utc_now_iso(),
         }
+
 
 def main() -> int:
     args = parse_args()

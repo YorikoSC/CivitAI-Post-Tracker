@@ -1,30 +1,51 @@
-# CivitAI Tracker v9
+# CivitAI Tracker v10.0-rc1
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
-## Current state
+v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
 
-This repository includes:
+## Features
 
-- desktop app with tray support
-- autonomous background polling
-- runtime diagnostics
-- source mode launcher via PowerShell
+- Local post analytics for CivitAI posts
+- Reaction tracking by post
+- Suggested posting windows based on historical performance
+- HTML dashboard with runtime status
+- Auto polling with tray support
+- Source mode launcher via PowerShell
 - EXE build flow via PyInstaller (`onedir`)
-- dashboard with:
-  - runtime status cards
-  - daily reaction summaries
-  - best-post blocks
-  - suggested posting windows
-  - collapsible analytics sections
+- Collection tracking for your images
+- Image-to-post correlation for collection events
+
+## Collection tracking
+
+Collection tracking focuses on incoming engagement with your own content:
+
+- **Added to collections**
+- **Affected images**
+- **Affected posts**
+- Recent collection events
+- Top posts/images by collection additions
+
+The dashboard intentionally does not duplicate the existing reaction analytics. Likes/reactions remain in the existing reaction sections; the new Collections section focuses on collection additions.
+
+## API key notes
+
+The base public-post tracker can run in a limited mode without an API key, depending on what CivitAI exposes publicly at the time.
+
+Collection tracking requires API key access because the tracker needs authenticated user-scoped transaction data to detect when your images are added to collections. If no API key is configured:
+
+- the main tracker should still start;
+- collection tracking is skipped/unavailable;
+- the Collections section may be empty or unavailable;
+- no collection events will be collected.
 
 ## Requirements
 
 - Python 3.11+
 - Windows is the primary target
-- A valid CivitAI API key
+- CivitAI API key recommended; required for collection tracking
 
-## Quick start (source mode)
+## Quick start: source mode
 
 1. Install dependencies:
 
@@ -32,9 +53,7 @@ This repository includes:
 python -m pip install -r requirements.txt
 ```
 
-2. Run the setup/config flow:
-- either start the app and save settings there
-- or use the existing setup helper if you prefer
+2. Create or edit `config.json` based on `config.example.json`.
 
 3. Launch the app:
 
@@ -42,7 +61,13 @@ python -m pip install -r requirements.txt
 .\launch_tracker.ps1
 ```
 
-## Quick start (EXE mode)
+Or directly:
+
+```powershell
+python tracker_app.py
+```
+
+## Quick start: EXE mode
 
 1. Build the EXE:
 
@@ -50,7 +75,7 @@ python -m pip install -r requirements.txt
 build_exe.bat
 ```
 
-2. Open the generated folder:
+2. Open:
 
 ```text
 dist\CivitAITracker
@@ -72,45 +97,63 @@ For a mostly hands-off workflow:
 - **Start minimized to tray** = enabled
 - **Start auto polling on launch** = enabled
 
+## Configuration
+
+Important collection-related settings:
+
+```json
+{
+  "options": {
+    "enable_buzz_ingest": true
+  },
+  "collection_tracking": {
+    "account_type": "blue",
+    "backfill_days": 60,
+    "overlap_hours": 24,
+    "max_pages": 10
+  }
+}
+```
+
+The internal key name `enable_buzz_ingest` is kept for compatibility. User-facing documentation and dashboard terminology refer to this feature as collection tracking.
+
 ## Main files
 
 - `tracker_app.py` — desktop UI
 - `tracker_runner.py` — polling loop and runtime orchestration
-- `tracker_service.py` — one-shot collection service
+- `tracker_service.py` — one-shot collection service and dashboard generation
 - `tracker_core.py` — thin CLI wrapper around the service layer
-- `config_utils.py` — config, paths, startup helpers
-- `launch_tracker.ps1` — source-mode launcher
-- `build_exe.bat` — PyInstaller build helper
+- `buzz_ingest.py` — internal incoming engagement ingestion
+- `engagement_correlation.py` — maps image-level events to tracked posts
+- `engagement_dashboard.py` — renders the Collections dashboard section
+- `config_utils.py` — config, path and diagnostics helpers
 
-## Diagnostics
+## Local data and privacy
 
-The app includes a **Diagnostics** view that checks:
-
-- execution mode (`source` / `frozen`)
-- Python version
-- config presence
-- username/API key availability
-- writable paths for runtime data, logs, DB, and dashboard
-
-## Notes
-
-- `civitai.red` is the recommended source mode for full visibility above PG-13.
-- Personal files such as `config.json`, `api_key.txt`, databases, logs, CSV exports, and generated dashboards are intentionally excluded from the repository package.
-- VBS is no longer treated as the main launcher strategy.
-
-## Repository hygiene
-
-Do not commit:
+The tracker stores runtime data locally:
 
 - `config.json`
-- `api_key.txt`
-- `*.db`
+- `api_key.txt` if you choose file-based API key storage
+- `civitai_tracker.db`
 - `csv/`
+- `logs/`
 - `dashboard.html`
 - `runtime_status.json`
-- `logs/`
 
-## Next planned investigation
+Do not commit these files to GitHub.
 
-See `BUZZ_COLLECTIONS_B1_SPEC.md` for the next research track:
-**Buzz / collections event probing**.
+## Troubleshooting
+
+Run a syntax check:
+
+```powershell
+python -m py_compile tracker_app.py tracker_runner.py tracker_service.py tracker_core.py buzz_ingest.py engagement_correlation.py engagement_dashboard.py
+```
+
+Check the engagement table:
+
+```powershell
+python -c "import sqlite3; c=sqlite3.connect('civitai_tracker.db'); print(c.execute(\"SELECT COUNT(*) FROM content_engagement_events WHERE normalized_type='collection_like'\").fetchone()[0]); c.close()"
+```
+
+If collection tracking is empty, verify that your API key is configured and that recent collection events exist for your account.

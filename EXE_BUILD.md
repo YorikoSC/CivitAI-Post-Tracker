@@ -1,47 +1,46 @@
-# EXE build
+# EXE build notes
 
-## Requirements
-
-- Python 3.11+
-- PyInstaller
+Recommended build mode: **PyInstaller onedir**.
 
 ## Build
 
-From the project root:
-
 ```powershell
-python -m pip install pyinstaller
 build_exe.bat
 ```
 
-The build uses **PyInstaller onedir** mode and writes output to:
+Output:
 
 ```text
-dist/CivitAITracker/
+dist\CivitAITracker\CivitAITracker.exe
 ```
 
 ## What to test after build
 
-1. `CivitAITracker.exe` starts without a console window.
-2. The app opens settings when `config.json` does not exist.
-3. `Run now` works.
-4. `Start auto polling` works.
-5. `dashboard.html` updates.
-6. `runtime_status.json` updates.
-7. Tray mode still works.
+1. Launch `CivitAITracker.exe`.
+2. Open Diagnostics.
+3. Save Settings if this is a fresh folder.
+4. Run now.
+5. Open dashboard.
+6. Confirm the Collections section appears when collection data exists.
 
-## Notes
+## v10 modules
 
-- The packaged app keeps runtime files alongside the EXE directory in this stage.
-- `config.example.json` is bundled as a template, but your personal `config.json` is never bundled.
-- Source-mode users should prefer `launch_tracker.ps1` instead of the legacy VBS launcher.
+The v10 collection tracking layer uses:
 
+- `buzz_ingest.py`
+- `engagement_correlation.py`
+- `engagement_dashboard.py`
 
-## Post-build checks
+They are imported by `tracker_service.py` and should be picked up by PyInstaller. The spec also lists them explicitly as hidden imports for safety.
 
-After launching the app, open **Diagnostics** and confirm that:
+## Do not ship personal runtime files
 
-- execution mode is `frozen`
-- runtime directory is writable
-- dashboard/database parents are writable
-- config and API key are available
+Do not include:
+
+- `config.json`
+- `api_key.txt`
+- `*.db`
+- `csv/`
+- `logs/`
+- `dashboard.html`
+- `runtime_status.json`

@@ -28,6 +28,13 @@
     "allow_rest_fallback": false,
     "launch_with_windows": false,
     "start_minimized": false,
-    "start_auto_polling_on_launch": false
+    "start_auto_polling_on_launch": false,
+    "enable_buzz_ingest": true
+  },
+  "collection_tracking": {
+    "account_type": "blue",
+    "backfill_days": 60,
+    "overlap_hours": 24,
+    "max_pages": 10
   }
 }

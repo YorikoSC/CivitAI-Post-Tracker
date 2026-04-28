@@ -5,6 +5,9 @@ from PyInstaller.utils.hooks import collect_submodules
 hiddenimports = [
     'pystray._win32',
     'PIL._tkinter_finder',
+    'buzz_ingest',
+    'engagement_correlation',
+    'engagement_dashboard',
 ]
 hiddenimports += collect_submodules('pystray')
 

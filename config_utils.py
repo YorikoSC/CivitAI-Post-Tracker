@@ -110,6 +110,13 @@ def default_config() -> dict[str, Any]:
             "launch_with_windows": False,
             "start_minimized": False,
             "start_auto_polling_on_launch": False,
+            "enable_buzz_ingest": True,
+        },
+        "collection_tracking": {
+            "account_type": "blue",
+            "backfill_days": 60,
+            "overlap_hours": 24,
+            "max_pages": 10,
         },
     }
 
