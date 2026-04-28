@@ -1,6 +1,6 @@
 # Changelog
 
-## v10.0-rc1
+## v10.0
 
 ### Added
 - Added collection tracking for images.
@@ -15,7 +15,7 @@
 
 ### Notes
 - Collection tracking requires API key access.
-- If no API key is configured, the main tracker should still run, but collection tracking is unavailable.
+- Without an API key, the app runs in limited public mode: collection tracking is unavailable and restricted / NSFW posts may be missing or incomplete.
 - Internal config names are kept compatible with the existing implementation.
 
 ## v9

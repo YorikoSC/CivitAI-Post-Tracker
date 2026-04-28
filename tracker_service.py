@@ -1319,7 +1319,7 @@ def render_dashboard(
 
     parts: List[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>")
-    parts.append("<title>CivitAI Tracker v10.0-rc1</title>")
+    parts.append("<title>CivitAI Tracker v10.0</title>")
     parts.append(f"<style>{css}</style>")
     parts.append(COLLECTION_SECTION_CSS)
     parts.append(
@@ -1336,7 +1336,7 @@ def render_dashboard(
     parts.append("</head><body><div class='wrap'>")
     parts.append(
         "<div class='hero'>"
-        f"<div><h1>CivitAI Tracker v10.0-rc1</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong></p></div>"
+        f"<div><h1>CivitAI Tracker v10.0</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong></p></div>"
         f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )

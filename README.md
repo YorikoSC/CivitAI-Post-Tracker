@@ -1,4 +1,4 @@
-# CivitAI Tracker v10.0-rc1
+# CivitAI Tracker v10.0
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
@@ -30,14 +30,17 @@ The dashboard intentionally does not duplicate the existing reaction analytics. 
 
 ## API key notes
 
-The base public-post tracker can run in a limited mode without an API key, depending on what CivitAI exposes publicly at the time.
+The app can start without an API key, but it will run in **limited public mode**. This mode is useful for basic public checks, but it is not equivalent to full tracking.
 
-Collection tracking requires API key access because the tracker needs authenticated user-scoped transaction data to detect when your images are added to collections. If no API key is configured:
+Without an API key:
 
-- the main tracker should still start;
-- collection tracking is skipped/unavailable;
-- the Collections section may be empty or unavailable;
-- no collection events will be collected.
+- the main app should still start;
+- collection tracking is unavailable;
+- user-scoped transaction data is unavailable;
+- restricted / NSFW posts may be missing or incomplete, depending on what CivitAI exposes publicly;
+- dashboard statistics may be incomplete for accounts that publish PG-13+ / restricted content.
+
+For full tracking, especially collection tracking and restricted-content visibility, provide a CivitAI API key.
 
 ## Requirements
 

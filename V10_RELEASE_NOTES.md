@@ -1,6 +1,6 @@
-# CivitAI Tracker v10.0-rc1 — Collection Tracking
+# CivitAI Tracker v10.0 — Collection Tracking
 
-This release candidate adds a new collection-aware analytics layer.
+This release adds a new collection-aware analytics layer.
 
 ## Highlights
 
@@ -25,7 +25,7 @@ Collection tracking requires API key access. Without an API key, the main tracke
 
 ## Pre-release checks
 
-Before final `v10.0`, verify:
+Release verification completed by source-mode and EXE-mode testing. Recommended smoke checks:
 
 - Source mode starts.
 - `Run now` updates the dashboard.
@@ -33,3 +33,7 @@ Before final `v10.0`, verify:
 - Collections section renders correctly.
 - EXE build starts and runs diagnostics.
 - No personal files are included in the release archive.
+
+## API key / limited mode
+
+The tracker can start without an API key, but this is a limited public mode. Collection tracking requires API key access, and restricted / NSFW posts may be missing without authentication.
