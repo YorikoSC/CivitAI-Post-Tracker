@@ -1,5 +1,18 @@
 # Changelog
 
+## v10.0.1
+
+### Added
+- Added collection sync state storage via `collection_sync_state`.
+- Added bootstrap vs maintenance collection sync modes.
+- Added collection coverage metadata and partial-history warnings for the dashboard.
+- Added collection-history rebuild helper for safe collections-only resets.
+
+### Changed
+- Collection sync now honors nested config and legacy/flat config compatibility.
+- Collection history now uses a safe backfill window and clear stop reasons (`reached_control_point`, `source_exhausted`, `page_limit_reached`, `error`).
+- Cursor handling is now validated to prevent bad `cursor=Date` requests.
+
 ## v10.0
 
 ### Added

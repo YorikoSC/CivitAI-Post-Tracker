@@ -4,6 +4,8 @@ A local Windows-first desktop utility for tracking CivitAI post performance, exp
 
 v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
 
+The v10.0.1 hotfix adds safer collection history handling: bootstrap vs maintenance sync modes, coverage-aware collection totals, and compatibility with older config files.
+
 ## Features
 
 - Local post analytics for CivitAI posts
@@ -106,14 +108,19 @@ Important collection-related settings:
 
 ```json
 {
+  "app": {
+    "config_version": 2
+  },
   "options": {
     "enable_buzz_ingest": true
   },
   "collection_tracking": {
     "account_type": "blue",
-    "backfill_days": 60,
+    "bootstrap_max_pages": 100,
+    "maintenance_max_pages": 10,
     "overlap_hours": 24,
-    "max_pages": 10
+    "max_history_days": 120,
+    "http_timeout_seconds": 60
   }
 }
 ```
@@ -160,3 +167,13 @@ python -c "import sqlite3; c=sqlite3.connect('civitai_tracker.db'); print(c.exec
 ```
 
 If collection tracking is empty, verify that your API key is configured and that recent collection events exist for your account.
+
+
+## Collection sync modes
+
+Collection tracking now uses two modes:
+
+- **bootstrap**: first full collection history load within the safe backfill window;
+- **maintenance**: lightweight incremental sync after bootstrap is complete.
+
+If the available source history ends before the selected tracking start, the tracker treats that as a normal completed load. If the page limit is reached first, collection totals are marked as potentially incomplete.

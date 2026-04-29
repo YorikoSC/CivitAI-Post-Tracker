@@ -33,8 +33,13 @@
   },
   "collection_tracking": {
     "account_type": "blue",
-    "backfill_days": 60,
+    "bootstrap_max_pages": 100,
+    "maintenance_max_pages": 10,
     "overlap_hours": 24,
-    "max_pages": 10
+    "max_history_days": 120,
+    "http_timeout_seconds": 60
+  },
+  "app": {
+    "config_version": 2
   }
 }

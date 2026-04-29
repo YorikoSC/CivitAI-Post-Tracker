@@ -1592,6 +1592,10 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
         "buzz_backfill_days": deep_get(cfg, "collection_tracking.backfill_days", 60),
         "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
         "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
+        "buzz_bootstrap_max_pages": deep_get(cfg, "collection_tracking.bootstrap_max_pages", deep_get(cfg, "collection_tracking.max_pages", 100)),
+        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", 10),
+        "buzz_max_history_days": deep_get(cfg, "collection_tracking.max_history_days", deep_get(cfg, "collection_tracking.backfill_days", 120)),
+        "buzz_http_timeout_seconds": deep_get(cfg, "collection_tracking.http_timeout_seconds", 60),
         "mode": api_mode,
         "host": view_host,
         "runtime_status_path": str(config_path.resolve().parent / "runtime_status.json"),
@@ -1720,6 +1724,10 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
         "buzz_backfill_days": deep_get(cfg, "collection_tracking.backfill_days", 60),
         "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
         "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
+        "buzz_bootstrap_max_pages": deep_get(cfg, "collection_tracking.bootstrap_max_pages", deep_get(cfg, "collection_tracking.max_pages", 100)),
+        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", 10),
+        "buzz_max_history_days": deep_get(cfg, "collection_tracking.max_history_days", deep_get(cfg, "collection_tracking.backfill_days", 120)),
+        "buzz_http_timeout_seconds": deep_get(cfg, "collection_tracking.http_timeout_seconds", 60),
         "mode": api_mode,
         "host": view_host,
         "runtime_status_path": str(config_base / "runtime_status.json"),
@@ -1804,6 +1812,14 @@ def run_collection_once(
             service_result["collection_events_new"] = 0
             service_result["collection_events_deduped"] = 0
             service_result["collection_pages_fetched"] = 0
+
+        service_result["collection_coverage_complete"] = bool(buzz_summary.get("coverage_complete")) if isinstance(buzz_summary, dict) else False
+        service_result["collection_stop_reason"] = buzz_summary.get("stop_reason") if isinstance(buzz_summary, dict) else None
+        service_result["collection_target_start"] = buzz_summary.get("target_start_time") if isinstance(buzz_summary, dict) else None
+        service_result["collection_oldest_event_time"] = buzz_summary.get("oldest_event_time_seen") if isinstance(buzz_summary, dict) else None
+        service_result["collection_latest_event_time"] = buzz_summary.get("latest_event_time_seen") if isinstance(buzz_summary, dict) else None
+        service_result["collection_mode"] = buzz_summary.get("collection_mode") if isinstance(buzz_summary, dict) else None
+        service_result["collection_bootstrap_completed"] = bool(buzz_summary.get("bootstrap_completed")) if isinstance(buzz_summary, dict) else False
 
         correlation_summary = None
         try:

@@ -16,6 +16,7 @@ except ImportError:  # pragma: no cover
 
 CONFIG_FILE = "config.json"
 EXAMPLE_CONFIG_FILE = "config.example.json"
+CURRENT_CONFIG_VERSION = 2
 AUTOSTART_SHORTCUT_NAME = "CivitAI Post Tracker.lnk"
 POWERSHELL_LAUNCHER_FILE = "launch_tracker.ps1"
 TIMEZONE_EXAMPLES = [
@@ -80,6 +81,9 @@ def choose(cli_value: Any, cfg_value: Any, default: Any = None) -> Any:
 
 def default_config() -> dict[str, Any]:
     return {
+        "app": {
+            "config_version": CURRENT_CONFIG_VERSION,
+        },
         "profile": {
             "username": "",
             "display_name": "",
@@ -114,22 +118,91 @@ def default_config() -> dict[str, Any]:
         },
         "collection_tracking": {
             "account_type": "blue",
-            "backfill_days": 60,
+            "bootstrap_max_pages": 100,
+            "maintenance_max_pages": 10,
             "overlap_hours": 24,
-            "max_pages": 10,
+            "max_history_days": 120,
+            "http_timeout_seconds": 60,
         },
     }
+
+
+def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
+    result: dict[str, Any] = dict(base)
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(result.get(key), dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
+    cfg = _deep_merge(default_config(), data or {})
+
+    # Promote legacy flat keys if they exist.
+    if data.get("username") and not deep_get(cfg, "profile.username"):
+        cfg["profile"]["username"] = data["username"]
+    if data.get("display_name") and not deep_get(cfg, "profile.display_name"):
+        cfg["profile"]["display_name"] = data["display_name"]
+    if data.get("timezone") and not deep_get(cfg, "profile.timezone"):
+        cfg["profile"]["timezone"] = data["timezone"]
+
+    if data.get("api_key") and not deep_get(cfg, "auth.api_key"):
+        cfg["auth"]["api_key"] = data["api_key"]
+    if data.get("api_key_file") and not deep_get(cfg, "auth.api_key_file"):
+        cfg["auth"]["api_key_file"] = data["api_key_file"]
+
+    if data.get("mode") and not deep_get(cfg, "api.mode"):
+        cfg["api"]["mode"] = data["mode"]
+    if data.get("host") and not deep_get(cfg, "api.view_host"):
+        cfg["api"]["view_host"] = data["host"]
+
+    if data.get("start_date") and not deep_get(cfg, "tracking.start_date"):
+        cfg["tracking"]["start_mode"] = "date"
+        cfg["tracking"]["start_date"] = data["start_date"]
+    if data.get("start_post_id") and not deep_get(cfg, "tracking.start_post_id"):
+        cfg["tracking"]["start_mode"] = "post_id"
+        cfg["tracking"]["start_post_id"] = data["start_post_id"]
+
+    ct = cfg.setdefault("collection_tracking", {})
+    for old_key, new_key in [
+        ("buzz_account_type", "account_type"),
+        ("buzz_overlap_hours", "overlap_hours"),
+        ("buzz_max_history_days", "max_history_days"),
+        ("buzz_http_timeout_seconds", "http_timeout_seconds"),
+    ]:
+        if data.get(old_key) not in (None, "") and ct.get(new_key) in (None, ""):
+            ct[new_key] = data[old_key]
+
+    if data.get("buzz_bootstrap_max_pages") not in (None, "") and ct.get("bootstrap_max_pages") in (None, ""):
+        ct["bootstrap_max_pages"] = data["buzz_bootstrap_max_pages"]
+    if data.get("buzz_maintenance_max_pages") not in (None, "") and ct.get("maintenance_max_pages") in (None, ""):
+        ct["maintenance_max_pages"] = data["buzz_maintenance_max_pages"]
+
+    # Legacy single max_pages/backfill_days fields.
+    if ct.get("bootstrap_max_pages") in (None, ""):
+        ct["bootstrap_max_pages"] = ct.get("max_pages", 100)
+    if ct.get("maintenance_max_pages") in (None, ""):
+        ct["maintenance_max_pages"] = min(int(ct.get("max_pages", 10) or 10), 25)
+    if ct.get("max_history_days") in (None, ""):
+        ct["max_history_days"] = ct.get("backfill_days", 120)
+    if ct.get("http_timeout_seconds") in (None, ""):
+        ct["http_timeout_seconds"] = 60
+
+    cfg.setdefault("app", {})["config_version"] = CURRENT_CONFIG_VERSION
+    return cfg
 
 
 def load_json_config(path: str | Path = CONFIG_FILE) -> dict[str, Any]:
     path = Path(path)
     if not path.exists():
-        return {}
+        return normalize_config({})
     with path.open("r", encoding="utf-8") as f:
         data = json.load(f)
     if not isinstance(data, dict):
         raise ValueError("config.json must contain a top-level object")
-    return data
+    return normalize_config(data)
 
 
 def load_yaml_config(path: str | Path = CONFIG_FILE) -> dict[str, Any]:
@@ -139,8 +212,9 @@ def load_yaml_config(path: str | Path = CONFIG_FILE) -> dict[str, Any]:
 def save_json_config(data: dict[str, Any], path: str | Path = CONFIG_FILE) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
+    normalized = normalize_config(data)
     with path.open("w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
+        json.dump(normalized, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
 

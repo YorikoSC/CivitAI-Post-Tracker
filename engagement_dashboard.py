@@ -10,9 +10,33 @@ def _fetch_all(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] = ())
     return cur.fetchall()
 
 
+def _load_collection_sync_state(conn: sqlite3.Connection) -> Dict[str, Any]:
+    try:
+        row = conn.execute(
+            "SELECT mode, last_sync_at, last_event_time_seen, oldest_event_time_seen, target_start_time, coverage_complete, stop_reason, pages_fetched_last_run, bootstrap_completed FROM collection_sync_state WHERE sync_key = 'default'"
+        ).fetchone()
+    except sqlite3.OperationalError:
+        return {}
+    if not row:
+        return {}
+    return {
+        "mode": row[0],
+        "last_sync_at": row[1],
+        "last_event_time_seen": row[2],
+        "oldest_event_time_seen": row[3],
+        "target_start_time": row[4],
+        "coverage_complete": bool(row[5]),
+        "stop_reason": row[6],
+        "pages_fetched_last_run": row[7],
+        "bootstrap_completed": bool(row[8]),
+    }
+
+
 def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limit: int = 10) -> Dict[str, Any]:
     conn = sqlite3.connect(db_path)
     try:
+        sync_state = _load_collection_sync_state(conn)
+
         total_adds = conn.execute(
             "SELECT COUNT(*) FROM content_engagement_events WHERE normalized_type = 'collection_like'"
         ).fetchone()[0]
@@ -93,6 +117,7 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
 
         return {
             "ok": True,
+            "sync_state": sync_state,
             "total_collection_adds": int(total_adds or 0),
             "affected_images": int(affected_images or 0),
             "affected_posts": int(affected_posts or 0),
@@ -128,6 +153,7 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
         return {
             "ok": False,
             "error": str(exc),
+            "sync_state": {},
             "total_collection_adds": 0,
             "affected_images": 0,
             "affected_posts": 0,
@@ -165,19 +191,10 @@ def _render_clean_table(headers: List[str], rows: List[List[Any]], empty_text: s
     else:
         body_rows = []
         for row in rows:
-            body_rows.append(
-                "<tr>"
-                + "".join(f"<td>{_fmt(cell)}</td>" for cell in row)
-                + "</tr>"
-            )
+            body_rows.append("<tr>" + "".join(f"<td>{_fmt(cell)}</td>" for cell in row) + "</tr>")
         body = "".join(body_rows)
 
-    return (
-        "<table class='clean-table'>"
-        f"<thead><tr>{head}</tr></thead>"
-        f"<tbody>{body}</tbody>"
-        "</table>"
-    )
+    return f"<table class='clean-table'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
 def _render_panel_table(title: str, hint: str, headers: List[str], rows: List[List[Any]]) -> str:
@@ -202,37 +219,50 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
             "</div>"
         )
 
+    sync_state = data.get("sync_state") or {}
+    stop_reason = str(sync_state.get("stop_reason") or "").strip()
+    coverage_complete = bool(sync_state.get("coverage_complete"))
+    collection_mode = str(sync_state.get("mode") or "").strip()
+
+    warning_html = ""
+    if stop_reason in {"page_limit_reached", "error"} or (sync_state and not coverage_complete):
+        warning_html = (
+            "<div class='panel' style='margin-top:18px'>"
+            "<div class='hint'><strong>Collection history may be incomplete.</strong> "
+            "The current collection totals were loaded only for part of the selected tracking window.</div>"
+            "</div>"
+        )
+
+    state_hint_parts: List[str] = []
+    if collection_mode:
+        state_hint_parts.append(f"Mode: {collection_mode}")
+    if sync_state.get("target_start_time"):
+        state_hint_parts.append(f"Target start: {sync_state.get('target_start_time')}")
+    if sync_state.get("oldest_event_time_seen"):
+        state_hint_parts.append(f"Oldest loaded: {sync_state.get('oldest_event_time_seen')}")
+    if sync_state.get("last_sync_at"):
+        state_hint_parts.append(f"Last sync: {sync_state.get('last_sync_at')}")
+    state_hint = " · ".join(state_hint_parts)
+
     recent_rows = [
-        [
-            item.get("event_time"),
-            item.get("image_id"),
-            item.get("post_id"),
-            item.get("by_user_id"),
-        ]
+        [item.get("event_time"), item.get("image_id"), item.get("post_id"), item.get("by_user_id")]
         for item in data.get("recent_collection_adds", [])
     ]
 
     top_post_rows = [
-        [
-            item.get("post_id"),
-            item.get("collection_adds"),
-            item.get("distinct_images_affected"),
-        ]
+        [item.get("post_id"), item.get("collection_adds"), item.get("distinct_images_affected")]
         for item in data.get("top_posts_by_collection_adds", [])
     ]
 
     top_image_rows = [
-        [
-            item.get("image_id"),
-            item.get("post_id"),
-            item.get("collection_adds"),
-        ]
+        [item.get("image_id"), item.get("post_id"), item.get("collection_adds")]
         for item in data.get("top_images_by_collection_adds", [])
     ]
 
     parts: List[str] = []
-
     parts.append("<div class='section-title'>Collections</div>")
+    if state_hint:
+        parts.append(f"<div class='hint' style='margin-top:4px'>{html.escape(state_hint)}</div>")
 
     parts.append("<div class='metrics'>")
     parts.append(_metric_card("Added to collections", data.get("total_collection_adds", 0), "Detected collection additions"))
@@ -241,9 +271,35 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
     parts.append(_metric_card("Last collection event", data.get("last_collection_event") or "—", "Latest detected collection add"))
     parts.append("</div>")
 
-    parts.append(_render_panel_table("Recent collection adds", "Latest detected additions of your images to collections.", ["Time", "Image ID", "Post ID", "Actor ID"], recent_rows))
-    parts.append(_render_panel_table("Top posts by collection adds", "Posts whose images were added to collections most often.", ["Post ID", "Collection adds", "Distinct images"], top_post_rows))
-    parts.append(_render_panel_table("Top images by collection adds", "Images most often added to collections.", ["Image ID", "Post ID", "Collection adds"], top_image_rows))
+    if warning_html:
+        parts.append(warning_html)
+
+    parts.append(
+        _render_panel_table(
+            "Recent collection adds",
+            "Latest detected additions of your images to collections.",
+            ["Time", "Image ID", "Post ID", "Actor ID"],
+            recent_rows,
+        )
+    )
+
+    parts.append(
+        _render_panel_table(
+            "Top posts by collection adds",
+            "Posts whose images were added to collections most often.",
+            ["Post ID", "Collection adds", "Distinct images"],
+            top_post_rows,
+        )
+    )
+
+    parts.append(
+        _render_panel_table(
+            "Top images by collection adds",
+            "Images most often added to collections.",
+            ["Image ID", "Post ID", "Collection adds"],
+            top_image_rows,
+        )
+    )
 
     return "".join(parts)
 
