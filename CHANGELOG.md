@@ -4,14 +4,21 @@
 
 ### Added
 - Added collection sync state storage via `collection_sync_state`.
+- Added collection runtime helpers via `collection_runtime`.
 - Added bootstrap vs maintenance collection sync modes.
 - Added collection coverage metadata and partial-history warnings for the dashboard.
 - Added collection-history rebuild helper for safe collections-only resets.
+- Added collection diagnostics to `logs/core_last.log`, including page summaries and raw transaction type counts.
+- Added self-contained smoke tests for collection parser, config compatibility, sync state, ingest mode switching, and dashboard file writes.
 
 ### Changed
 - Collection sync now honors nested config and legacy/flat config compatibility.
 - Collection history now uses a safe backfill window and clear stop reasons (`reached_control_point`, `source_exhausted`, `page_limit_reached`, `error`).
 - Cursor handling is now validated to prevent bad `cursor=Date` requests.
+- tRPC transaction parsing now handles batched response shapes and both `transactions` and `items` payload keys.
+- Dashboard HTML is rewritten atomically, includes a generated timestamp, and is opened with a cache-busting version parameter from the app.
+- Runtime paths for DB, CSV, dashboard HTML, and API key file are resolved relative to `config.json`.
+- New configs use `options.enable_collection_tracking`; the old `options.enable_buzz_ingest` key is still accepted.
 
 ## v10.0
 

@@ -4,6 +4,8 @@ import html
 import sqlite3
 from typing import Any, Dict, List, Tuple
 
+from collection_sync_state import read_collection_sync_state
+
 
 def _fetch_all(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] = ()) -> List[tuple]:
     cur = conn.execute(sql, params)
@@ -12,24 +14,12 @@ def _fetch_all(conn: sqlite3.Connection, sql: str, params: Tuple[Any, ...] = ())
 
 def _load_collection_sync_state(conn: sqlite3.Connection) -> Dict[str, Any]:
     try:
-        row = conn.execute(
-            "SELECT mode, last_sync_at, last_event_time_seen, oldest_event_time_seen, target_start_time, coverage_complete, stop_reason, pages_fetched_last_run, bootstrap_completed FROM collection_sync_state WHERE sync_key = 'default'"
-        ).fetchone()
+        row = read_collection_sync_state(conn)
     except sqlite3.OperationalError:
         return {}
     if not row:
         return {}
-    return {
-        "mode": row[0],
-        "last_sync_at": row[1],
-        "last_event_time_seen": row[2],
-        "oldest_event_time_seen": row[3],
-        "target_start_time": row[4],
-        "coverage_complete": bool(row[5]),
-        "stop_reason": row[6],
-        "pages_fetched_last_run": row[7],
-        "bootstrap_completed": bool(row[8]),
-    }
+    return row
 
 
 def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limit: int = 10) -> Dict[str, Any]:

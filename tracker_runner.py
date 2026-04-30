@@ -67,6 +67,14 @@ class TrackerRunner:
             "captured_at": result.get("captured_at", ""),
             "image_rows": result.get("image_rows", 0),
             "image_source": result.get("image_source", ""),
+            "collection_warning": result.get("collection_warning", ""),
+            "collection_mode": result.get("collection_mode"),
+            "collection_events_new": result.get("collection_events_new", 0),
+            "collection_events_deduped": result.get("collection_events_deduped", 0),
+            "collection_pages_fetched": result.get("collection_pages_fetched", 0),
+            "collection_stop_reason": result.get("collection_stop_reason"),
+            "collection_ingest": result.get("collection_ingest", {}),
+            "engagement_correlation": result.get("engagement_correlation", {}),
         }
         with (logs_dir / "core_last.log").open("w", encoding="utf-8") as f:
             json.dump(payload, f, indent=2, ensure_ascii=False)
@@ -165,8 +173,12 @@ class TrackerRunner:
                 self._log(
                     "Collection finished successfully. "
                     f"host={result.get('selected_host', '')} "
-                    f"tracked_posts={result.get('posts_tracked', 0)}"
+                    f"tracked_posts={result.get('posts_tracked', 0)} "
+                    f"collection_new={result.get('collection_events_new', 0)} "
+                    f"collection_stop={result.get('collection_stop_reason') or 'n/a'}"
                 )
+                if result.get("collection_warning"):
+                    self._log(f"Collection warning: {result.get('collection_warning')}")
                 self._persist_runtime_status(refresh_dashboard=True)
                 return True
 

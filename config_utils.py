@@ -114,7 +114,7 @@ def default_config() -> dict[str, Any]:
             "launch_with_windows": False,
             "start_minimized": False,
             "start_auto_polling_on_launch": False,
-            "enable_buzz_ingest": True,
+            "enable_collection_tracking": True,
         },
         "collection_tracking": {
             "account_type": "blue",
@@ -165,6 +165,19 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
         cfg["tracking"]["start_mode"] = "post_id"
         cfg["tracking"]["start_post_id"] = data["start_post_id"]
 
+    raw_options = data.get("options") if isinstance(data.get("options"), dict) else {}
+    collection_enabled = raw_options.get("enable_collection_tracking")
+    if collection_enabled in (None, ""):
+        collection_enabled = data.get("enable_collection_tracking")
+    if collection_enabled in (None, ""):
+        collection_enabled = raw_options.get("enable_buzz_ingest")
+    if collection_enabled in (None, ""):
+        collection_enabled = data.get("enable_buzz_ingest")
+    if collection_enabled not in (None, ""):
+        cfg["options"]["enable_collection_tracking"] = bool(collection_enabled)
+    cfg["options"]["enable_buzz_ingest"] = bool(cfg["options"].get("enable_collection_tracking", True))
+
+    raw_ct = data.get("collection_tracking") if isinstance(data.get("collection_tracking"), dict) else {}
     ct = cfg.setdefault("collection_tracking", {})
     for old_key, new_key in [
         ("buzz_account_type", "account_type"),
@@ -181,12 +194,28 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
         ct["maintenance_max_pages"] = data["buzz_maintenance_max_pages"]
 
     # Legacy single max_pages/backfill_days fields.
-    if ct.get("bootstrap_max_pages") in (None, ""):
-        ct["bootstrap_max_pages"] = ct.get("max_pages", 100)
-    if ct.get("maintenance_max_pages") in (None, ""):
-        ct["maintenance_max_pages"] = min(int(ct.get("max_pages", 10) or 10), 25)
-    if ct.get("max_history_days") in (None, ""):
-        ct["max_history_days"] = ct.get("backfill_days", 120)
+    legacy_max_pages = data.get("buzz_max_pages")
+    if legacy_max_pages in (None, ""):
+        legacy_max_pages = raw_ct.get("max_pages")
+    if legacy_max_pages not in (None, ""):
+        if data.get("buzz_bootstrap_max_pages") in (None, "") and raw_ct.get("bootstrap_max_pages") in (None, ""):
+            ct["bootstrap_max_pages"] = legacy_max_pages
+        if data.get("buzz_maintenance_max_pages") in (None, "") and raw_ct.get("maintenance_max_pages") in (None, ""):
+            try:
+                ct["maintenance_max_pages"] = min(int(legacy_max_pages), 25)
+            except Exception:
+                ct["maintenance_max_pages"] = legacy_max_pages
+
+    legacy_backfill_days = data.get("buzz_backfill_days")
+    if legacy_backfill_days in (None, ""):
+        legacy_backfill_days = raw_ct.get("backfill_days")
+    if (
+        legacy_backfill_days not in (None, "")
+        and data.get("buzz_max_history_days") in (None, "")
+        and raw_ct.get("max_history_days") in (None, "")
+    ):
+        ct["max_history_days"] = legacy_backfill_days
+
     if ct.get("http_timeout_seconds") in (None, ""):
         ct["http_timeout_seconds"] = 60
 

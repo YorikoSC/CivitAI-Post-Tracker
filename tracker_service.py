@@ -46,6 +46,21 @@ def ensure_dir(path: str) -> None:
     os.makedirs(path, exist_ok=True)
 
 
+def resolve_runtime_path(path_value: Any, base_dir: Path) -> str:
+    path = Path(str(path_value or "")).expanduser()
+    if not path.is_absolute():
+        path = base_dir / path
+    return str(path.resolve())
+
+
+def write_dashboard_html(html_path: str, content: str) -> None:
+    path = Path(html_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_name(f"{path.name}.tmp")
+    temp_path.write_text(content, encoding="utf-8")
+    temp_path.replace(path)
+
+
 class TimezoneHelper:
     def __init__(self, tz_name: str):
         self.tz_name = tz_name
@@ -196,7 +211,7 @@ def init_db(conn: sqlite3.Connection) -> None:
 
 def build_headers(api_key: Optional[str]) -> Dict[str, str]:
     headers = {
-        "User-Agent": "civitai-post-tracker-v8.3-core/1.0",
+        "User-Agent": "civitai-post-tracker-v10.0.1-core/1.0",
         "Accept": "application/json",
     }
     if api_key:
@@ -1317,9 +1332,13 @@ def render_dashboard(
     @media (max-width:1100px){.feature-grid,.reaction-row{grid-template-columns:1fr}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}}
     """
 
+    generated_at = utc_now_iso()
     parts: List[str] = []
     parts.append("<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width, initial-scale=1'>")
-    parts.append("<title>CivitAI Tracker v10.0</title>")
+    parts.append("<meta http-equiv='Cache-Control' content='no-store, no-cache, must-revalidate, max-age=0'>")
+    parts.append("<meta http-equiv='Pragma' content='no-cache'><meta http-equiv='Expires' content='0'>")
+    parts.append(f"<meta name='generated-at' content='{html.escape(generated_at, quote=True)}'>")
+    parts.append("<title>CivitAI Tracker v10.0.1</title>")
     parts.append(f"<style>{css}</style>")
     parts.append(COLLECTION_SECTION_CSS)
     parts.append(
@@ -1336,7 +1355,7 @@ def render_dashboard(
     parts.append("</head><body><div class='wrap'>")
     parts.append(
         "<div class='hero'>"
-        f"<div><h1>CivitAI Tracker v10.0</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong></p></div>"
+        f"<div><h1>CivitAI Tracker v10.0.1</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong> · generated {html.escape(tz_helper.fmt_dt(generated_at))}</p></div>"
         f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )
@@ -1405,10 +1424,10 @@ def render_dashboard(
     parts.append("</div>")
 
     parts.append("</div></body></html>")
-    Path(html_path).write_text(''.join(parts), encoding='utf-8')
+    write_dashboard_html(html_path, ''.join(parts))
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="CivitAI post-based tracker using tRPC post.getInfinite (dashboard architecture polish v8.8).")
+    parser = argparse.ArgumentParser(description="CivitAI post-based tracker using tRPC post.getInfinite.")
     parser.add_argument("--config", default="config.json", help="Path to JSON config file")
     parser.add_argument("--username", default=None, help="CivitAI username")
     parser.add_argument("--display-name", default=None, help="Display name shown in dashboard")
@@ -1514,12 +1533,13 @@ def run_once(
 
 
 def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
-    config_path = Path(args.config)
+    config_path = Path(args.config).resolve()
     if not config_path.exists():
         raise FileNotFoundError(
             f"Config file not found: {config_path}\n"
             f"Run: python setup_config.py"
         )
+    config_base = config_path.parent
 
     cfg = load_yaml_config(str(config_path))
 
@@ -1527,9 +1547,9 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
     dashboard_name = choose(args.display_name, deep_get(cfg, "profile.display_name"), username)
     tz_name = choose(args.tz, deep_get(cfg, "profile.timezone"), "UTC")
 
-    db_path = choose(args.db, deep_get(cfg, "paths.db"), "civitai_tracker_v8.db")
-    csv_dir = choose(args.csv_dir, deep_get(cfg, "paths.csv_dir"), "csv")
-    html_path = choose(args.html, deep_get(cfg, "paths.html"), "dashboard.html")
+    db_path = resolve_runtime_path(choose(args.db, deep_get(cfg, "paths.db"), "civitai_tracker.db"), config_base)
+    csv_dir = resolve_runtime_path(choose(args.csv_dir, deep_get(cfg, "paths.csv_dir"), "csv"), config_base)
+    html_path = resolve_runtime_path(choose(args.html, deep_get(cfg, "paths.html"), "dashboard.html"), config_base)
 
     api_mode = choose(args.api_mode, deep_get(cfg, "api.mode"), DEFAULT_API_MODE)
     view_host = choose(args.view_host, deep_get(cfg, "api.view_host"), DEFAULT_VIEW_HOST)
@@ -1561,7 +1581,7 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
     )
 
     inline_api_key = choose(args.api_key, deep_get(cfg, "auth.api_key"))
-    api_key_file = choose(args.api_key_file, deep_get(cfg, "auth.api_key_file"), "api_key.txt")
+    api_key_file = resolve_runtime_path(choose(args.api_key_file, deep_get(cfg, "auth.api_key_file"), "api_key.txt"), config_base)
     api_key = read_api_key(inline_api_key, api_key_file)
 
     if not username:
@@ -1593,12 +1613,12 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
         "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
         "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
         "buzz_bootstrap_max_pages": deep_get(cfg, "collection_tracking.bootstrap_max_pages", deep_get(cfg, "collection_tracking.max_pages", 100)),
-        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", 10),
+        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", deep_get(cfg, "collection_tracking.max_pages", 10)),
         "buzz_max_history_days": deep_get(cfg, "collection_tracking.max_history_days", deep_get(cfg, "collection_tracking.backfill_days", 120)),
         "buzz_http_timeout_seconds": deep_get(cfg, "collection_tracking.http_timeout_seconds", 60),
         "mode": api_mode,
         "host": view_host,
-        "runtime_status_path": str(config_path.resolve().parent / "runtime_status.json"),
+        "runtime_status_path": str(config_base / "runtime_status.json"),
     }
 
 
@@ -1678,9 +1698,9 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
     dashboard_name = deep_get(cfg, "profile.display_name") or username
     tz_name = deep_get(cfg, "profile.timezone", "UTC")
 
-    db_path = deep_get(cfg, "paths.db", "civitai_tracker_v8.db")
-    csv_dir = deep_get(cfg, "paths.csv_dir", "csv")
-    html_path = deep_get(cfg, "paths.html", "dashboard.html")
+    db_path = resolve_runtime_path(deep_get(cfg, "paths.db", "civitai_tracker.db"), config_base)
+    csv_dir = resolve_runtime_path(deep_get(cfg, "paths.csv_dir", "csv"), config_base)
+    html_path = resolve_runtime_path(deep_get(cfg, "paths.html", "dashboard.html"), config_base)
 
     api_mode = deep_get(cfg, "api.mode", DEFAULT_API_MODE)
     view_host = deep_get(cfg, "api.view_host", DEFAULT_VIEW_HOST)
@@ -1693,7 +1713,7 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
 
     allow_rest_fallback = bool(deep_get(cfg, "options.allow_rest_fallback", False))
     inline_api_key = deep_get(cfg, "auth.api_key")
-    api_key_file = deep_get(cfg, "auth.api_key_file", "api_key.txt")
+    api_key_file = resolve_runtime_path(deep_get(cfg, "auth.api_key_file", "api_key.txt"), config_base)
     api_key = read_api_key(inline_api_key, api_key_file)
 
     if not username:
@@ -1725,7 +1745,7 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
         "buzz_overlap_hours": deep_get(cfg, "collection_tracking.overlap_hours", 24),
         "buzz_max_pages": deep_get(cfg, "collection_tracking.max_pages", 10),
         "buzz_bootstrap_max_pages": deep_get(cfg, "collection_tracking.bootstrap_max_pages", deep_get(cfg, "collection_tracking.max_pages", 100)),
-        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", 10),
+        "buzz_maintenance_max_pages": deep_get(cfg, "collection_tracking.maintenance_max_pages", deep_get(cfg, "collection_tracking.max_pages", 10)),
         "buzz_max_history_days": deep_get(cfg, "collection_tracking.max_history_days", deep_get(cfg, "collection_tracking.backfill_days", 120)),
         "buzz_http_timeout_seconds": deep_get(cfg, "collection_tracking.http_timeout_seconds", 60),
         "mode": api_mode,
@@ -1820,6 +1840,21 @@ def run_collection_once(
         service_result["collection_latest_event_time"] = buzz_summary.get("latest_event_time_seen") if isinstance(buzz_summary, dict) else None
         service_result["collection_mode"] = buzz_summary.get("collection_mode") if isinstance(buzz_summary, dict) else None
         service_result["collection_bootstrap_completed"] = bool(buzz_summary.get("bootstrap_completed")) if isinstance(buzz_summary, dict) else False
+        service_result["collection_last_sync_at"] = buzz_summary.get("captured_at") if isinstance(buzz_summary, dict) else None
+        service_result["collection_unavailable_reason"] = (
+            buzz_summary.get("reason") if isinstance(buzz_summary, dict) else None
+        )
+        if (
+            engagement_enabled
+            and runtime.get("api_key")
+            and isinstance(buzz_summary, dict)
+            and not buzz_summary.get("ok")
+        ):
+            service_result["collection_warning"] = (
+                buzz_summary.get("error")
+                or buzz_summary.get("reason")
+                or "Collection tracking did not complete."
+            )
 
         correlation_summary = None
         try:
