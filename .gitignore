@@ -9,6 +9,7 @@ logs/
 probe_results/
 __pycache__/
 *.pyc
+.smoke_tmp/
 .venv/
 venv/
 dist/

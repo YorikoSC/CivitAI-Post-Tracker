@@ -114,7 +114,7 @@ def default_config() -> dict[str, Any]:
             "launch_with_windows": False,
             "start_minimized": False,
             "start_auto_polling_on_launch": False,
-            "enable_buzz_ingest": True,
+            "enable_collection_tracking": True,
         },
         "collection_tracking": {
             "account_type": "blue",
@@ -164,6 +164,18 @@ def normalize_config(data: dict[str, Any]) -> dict[str, Any]:
     if data.get("start_post_id") and not deep_get(cfg, "tracking.start_post_id"):
         cfg["tracking"]["start_mode"] = "post_id"
         cfg["tracking"]["start_post_id"] = data["start_post_id"]
+
+    raw_options = data.get("options") if isinstance(data.get("options"), dict) else {}
+    collection_enabled = raw_options.get("enable_collection_tracking")
+    if collection_enabled in (None, ""):
+        collection_enabled = data.get("enable_collection_tracking")
+    if collection_enabled in (None, ""):
+        collection_enabled = raw_options.get("enable_buzz_ingest")
+    if collection_enabled in (None, ""):
+        collection_enabled = data.get("enable_buzz_ingest")
+    if collection_enabled not in (None, ""):
+        cfg["options"]["enable_collection_tracking"] = bool(collection_enabled)
+    cfg["options"]["enable_buzz_ingest"] = bool(cfg["options"].get("enable_collection_tracking", True))
 
     raw_ct = data.get("collection_tracking") if isinstance(data.get("collection_tracking"), dict) else {}
     ct = cfg.setdefault("collection_tracking", {})

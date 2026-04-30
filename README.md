@@ -1,10 +1,10 @@
-# CivitAI Tracker v10.0
+# CivitAI Tracker v10.0.1
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
 v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
 
-The v10.0.1 hotfix adds safer collection history handling: bootstrap vs maintenance sync modes, coverage-aware collection totals, and compatibility with older config files.
+The v10.0.1 hotfix stabilizes collection history handling: bootstrap vs maintenance sync modes, coverage-aware collection totals, safer dashboard refreshes, and compatibility with older config files.
 
 ## Features
 
@@ -112,7 +112,7 @@ Important collection-related settings:
     "config_version": 2
   },
   "options": {
-    "enable_buzz_ingest": true
+    "enable_collection_tracking": true
   },
   "collection_tracking": {
     "account_type": "blue",
@@ -125,7 +125,9 @@ Important collection-related settings:
 }
 ```
 
-The internal key name `enable_buzz_ingest` is kept for compatibility. User-facing documentation and dashboard terminology refer to this feature as collection tracking.
+The old internal key name `enable_buzz_ingest` is still accepted for compatibility. New configs should use `enable_collection_tracking`, and the dashboard refers to this feature as collection tracking.
+
+Older configs that still use `collection_tracking.max_pages` or `collection_tracking.backfill_days` are normalized into the newer `bootstrap_max_pages`, `maintenance_max_pages`, and `max_history_days` fields.
 
 ## Main files
 
@@ -134,6 +136,8 @@ The internal key name `enable_buzz_ingest` is kept for compatibility. User-facin
 - `tracker_service.py` — one-shot collection service and dashboard generation
 - `tracker_core.py` — thin CLI wrapper around the service layer
 - `buzz_ingest.py` — internal incoming engagement ingestion
+- `collection_runtime.py` — collection config normalization and sync-mode decisions
+- `collection_sync_state.py` — collection sync state schema and persistence
 - `engagement_correlation.py` — maps image-level events to tracked posts
 - `engagement_dashboard.py` — renders the Collections dashboard section
 - `config_utils.py` — config, path and diagnostics helpers
@@ -157,16 +161,51 @@ Do not commit these files to GitHub.
 Run a syntax check:
 
 ```powershell
-python -m py_compile tracker_app.py tracker_runner.py tracker_service.py tracker_core.py buzz_ingest.py engagement_correlation.py engagement_dashboard.py
+python -m py_compile tracker_app.py tracker_runner.py tracker_service.py tracker_core.py buzz_ingest.py collection_runtime.py collection_sync_state.py engagement_correlation.py engagement_dashboard.py
 ```
 
-Check the engagement table:
+Run smoke tests:
+
+```powershell
+python tests\smoke_tests.py
+```
+
+Check the latest run summary:
+
+```powershell
+Get-Content .\logs\core_last.log
+```
+
+For collection tracking, inspect:
+
+- `collection_ingest.ok`
+- `collection_ingest.collection_mode`
+- `collection_ingest.pages_fetched`
+- `collection_ingest.events_seen`
+- `collection_ingest.events_core`
+- `collection_ingest.type_counts`
+- `collection_ingest.stop_reason`
+- `engagement_correlation.ok`
+- `engagement_correlation.distinct_posts_correlated`
+
+Check the engagement table directly:
 
 ```powershell
 python -c "import sqlite3; c=sqlite3.connect('civitai_tracker.db'); print(c.execute(\"SELECT COUNT(*) FROM content_engagement_events WHERE normalized_type='collection_like'\").fetchone()[0]); c.close()"
 ```
 
-If collection tracking is empty, verify that your API key is configured and that recent collection events exist for your account.
+If collection tracking is empty, verify that your API key is configured, recent collection events exist for your account, and `collection_ingest.page_summaries` contains `collectedContent:image`.
+
+## Build verification
+
+Before publishing or merging a cleanup branch:
+
+1. Run the syntax check above.
+2. Run the app from source and confirm `Run now` updates `logs/core_last.log`.
+3. Build with `build_exe.bat`.
+4. Launch `dist\CivitAITracker\CivitAITracker.exe`.
+5. Test with and without an API key.
+6. Open the dashboard from the app and confirm the `generated ...` timestamp changes after a run.
 
 
 ## Collection sync modes
@@ -177,3 +216,5 @@ Collection tracking now uses two modes:
 - **maintenance**: lightweight incremental sync after bootstrap is complete.
 
 If the available source history ends before the selected tracking start, the tracker treats that as a normal completed load. If the page limit is reached first, collection totals are marked as potentially incomplete.
+
+The generated dashboard is rewritten atomically and opened with a cache-busting version parameter from the desktop app. If the dashboard looks stale, check the `generated ...` timestamp at the top of the page first.

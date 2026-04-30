@@ -22,12 +22,16 @@ dist\CivitAITracker\CivitAITracker.exe
 4. Run now.
 5. Open dashboard.
 6. Confirm the Collections section appears when collection data exists.
+7. Confirm the dashboard header `generated ...` timestamp changes after a new run.
+8. Check `logs\core_last.log` and confirm `collection_ingest.ok` is true when an API key is configured.
 
 ## v10 modules
 
 The v10 collection tracking layer uses:
 
 - `buzz_ingest.py`
+- `collection_runtime.py`
+- `collection_sync_state.py`
 - `engagement_correlation.py`
 - `engagement_dashboard.py`
 

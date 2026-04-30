@@ -55,6 +55,20 @@ The post table usually includes:
 - Comments
 - Last seen / last update
 
+### Collections
+
+The Collections section shows image-level collection events from the authenticated transaction feed and rolls them back up to tracked posts when the image is known locally.
+
+It includes:
+
+- Added to collections
+- Affected images
+- Affected posts
+- Last collection event
+- Recent collection adds
+- Top posts by collection adds
+- Top images by collection adds
+
 ## Important interpretation notes
 
 ### Suggested posting windows are not absolute
@@ -79,6 +93,14 @@ They are not simply the oldest post with the highest lifetime total.
 
 Dashboard periods are interpreted using the configured local timezone.
 
+### API key affects new collection syncs
+
+Without an API key, collection tracking is unavailable and restricted / NSFW content may be incomplete. Already stored local database rows are not hidden when the key is removed; the key only controls what the tracker can fetch on future runs.
+
+### Generated timestamp
+
+The dashboard header includes a `generated ...` timestamp. If a browser tab looks stale, confirm that this timestamp changed after the latest run.
+
 ## Practical use
 
 Use the dashboard to answer questions like:
@@ -87,6 +109,7 @@ Use the dashboard to answer questions like:
 - What time slots produced the best first-day performance?
 - Which post is currently performing best this week?
 - How much engagement came in today, and of what type?
+- Which images and posts are being added to collections?
 
 ## What the dashboard does not guarantee
 
