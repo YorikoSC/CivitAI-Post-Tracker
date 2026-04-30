@@ -792,7 +792,9 @@ def avg_or_none(values: Iterable[Optional[int]]) -> Optional[float]:
 
 def confidence_label(posts_count: int, known_count: int) -> str:
     score = min(posts_count, known_count)
-    if score >= 8:
+    if score >= 12:
+        return "high"
+    if score >= 6:
         return "medium"
     if score >= 3:
         return "low"
@@ -1023,10 +1025,46 @@ def summarize_collection_periods(
     }
 
 
+def recommendation_score(row: Dict[str, Any]) -> Optional[Tuple[float, str, str]]:
+    if row.get("avg_24h_reactions") is not None:
+        return float(row["avg_24h_reactions"]), "Avg 24h reactions", "first-day performance"
+    if row.get("avg_total_reactions") is not None:
+        return float(row["avg_total_reactions"]), "Avg total reactions", "lifetime totals"
+    if row.get("avg_total_engagement") is not None:
+        return float(row["avg_total_engagement"]), "Avg total engagement", "lifetime engagement"
+    return None
+
+
+def select_recommendations(rows: List[dict], label_key: str, min_posts: int = 3, limit: int = 3) -> List[dict]:
+    candidates: List[dict] = []
+    for row in rows:
+        score = recommendation_score(row)
+        if int(row.get("posts") or 0) < min_posts or score is None:
+            continue
+        value, metric_label, basis = score
+        candidate = dict(row)
+        candidate["label"] = row.get(label_key)
+        candidate["recommendation_score"] = value
+        candidate["recommendation_metric"] = metric_label
+        candidate["recommendation_basis"] = basis
+        candidates.append(candidate)
+    candidates.sort(
+        key=lambda r: (
+            float(r.get("recommendation_score") or 0),
+            int(r.get("posts") or 0),
+            str(r.get("label") or ""),
+        ),
+        reverse=True,
+    )
+    return candidates[:limit]
+
+
 def select_suggested_windows(hour_summary: List[dict]) -> List[dict]:
-    candidates = [row for row in hour_summary if row.get("posts", 0) >= 3 and row.get("avg_24h_reactions") is not None]
-    candidates.sort(key=lambda r: (float(r.get("avg_24h_reactions") or 0), float(r.get("avg_2h_reactions") or 0), int(r.get("posts") or 0)), reverse=True)
-    return candidates[:3]
+    return select_recommendations(hour_summary, "hour", min_posts=3, limit=3)
+
+
+def select_suggested_weekdays(weekday_summary: List[dict]) -> List[dict]:
+    return select_recommendations(weekday_summary, "weekday", min_posts=3, limit=3)
 
 
 def fmt_num(value: Optional[float]) -> str:
@@ -1162,6 +1200,7 @@ def render_dashboard(
     period_summary = summarize_reaction_periods(deltas, tz_helper, current_posts)
     collection_period_summary = summarize_collection_periods(conn, tz_helper, current_posts)
     suggested_windows = select_suggested_windows(hour_summary)
+    suggested_weekdays = select_suggested_weekdays(weekday_summary)
 
     tracked_posts = len(current_posts)
     known_totals = sum(1 for r in current_posts if r["stats_known"])
@@ -1293,25 +1332,88 @@ def render_dashboard(
             "</div>"
         )
 
-    def render_windows_table(rows: List[dict]) -> str:
+    def render_recommendation_card(title: str, row: Optional[dict], empty_text: str) -> str:
+        if not row:
+            return (
+                "<div class='feature-card'>"
+                f"<div class='feature-title'>{html.escape(title)}</div>"
+                "<div class='empty-state'>—</div>"
+                f"<div class='feature-note'>{html.escape(empty_text)}</div>"
+                "</div>"
+            )
+        return (
+            "<div class='feature-card'>"
+            f"<div class='feature-title'>{html.escape(title)}</div>"
+            f"<div class='feature-score'>{html.escape(str(row.get('label') or '—'))}</div>"
+            f"<div class='feature-note'>{fmt_num(row.get('recommendation_score'))} {html.escape(str(row.get('recommendation_metric') or '').lower())}</div>"
+            f"<div class='feature-note'>{int(row.get('posts') or 0)} tracked posts · basis: {html.escape(str(row.get('recommendation_basis') or 'available data'))}</div>"
+            f"<div class='feature-note'>Confidence: {chip(row.get('confidence') or 'low')}</div>"
+            "</div>"
+        )
+
+    def render_recommendation_table(title: str, rows: List[dict], label_header: str) -> str:
         if not rows:
-            return "<div class='feature-note'>Not enough post history yet.</div>"
+            return f"<div class='feature-note'>Not enough post history yet for {html.escape(title.lower())}.</div>"
         body = []
-        for row in rows:
+        for idx, row in enumerate(rows, start=1):
             body.append(
                 "<tr>"
-                f"<td>{html.escape(str(row['hour']))}</td>"
-                f"<td class='num'>{int(row['posts'])}</td>"
-                f"<td class='num'>{fmt_num(row['avg_2h_reactions'])}</td>"
-                f"<td class='num'>{fmt_num(row['avg_24h_reactions'])}</td>"
-                f"<td>{chip(row['confidence'])}</td>"
+                f"<td class='num'>{idx}</td>"
+                f"<td>{html.escape(str(row.get('label') or '—'))}</td>"
+                f"<td class='num'>{int(row.get('posts') or 0)}</td>"
+                f"<td class='num'>{fmt_num(row.get('recommendation_score'))}</td>"
+                f"<td>{html.escape(str(row.get('recommendation_metric') or 'n/a'))}</td>"
+                f"<td>{html.escape(str(row.get('recommendation_basis') or 'available data'))}</td>"
+                f"<td>{chip(row.get('confidence') or 'low')}</td>"
                 "</tr>"
             )
         return (
             "<table class='clean-table'>"
-            "<thead><tr><th>Hour</th><th class='num'>Posts</th><th class='num'>Avg 2h reactions</th><th class='num'>Avg 24h reactions</th><th>Confidence</th></tr></thead>"
+            f"<thead><tr><th>#</th><th>{html.escape(label_header)}</th><th class='num'>Posts</th><th class='num'>Score</th><th>Metric</th><th>Basis</th><th>Confidence</th></tr></thead>"
             f"<tbody>{''.join(body)}</tbody></table>"
         )
+
+    def render_posting_recommendations(hour_rows: List[dict], weekday_rows: List[dict]) -> str:
+        basis_values = {str(row.get("recommendation_basis") or "") for row in [*hour_rows, *weekday_rows] if row}
+        if "first-day performance" in basis_values:
+            basis_title = "First-day data"
+            basis_detail = "Recommendations prefer captured 24h performance where available."
+        elif basis_values:
+            basis_title = "Lifetime totals"
+            basis_detail = "Early 2h/24h windows are not available yet, so this uses current totals."
+        else:
+            basis_title = "Not enough data"
+            basis_detail = "Keep collecting snapshots before treating timing advice seriously."
+
+        parts_rec: List[str] = []
+        parts_rec.append("<div class='section-title'>Posting recommendations</div>")
+        parts_rec.append("<div class='feature-grid'>")
+        parts_rec.append(render_recommendation_card("Best posting hour", hour_rows[0] if hour_rows else None, "No reliable hour candidate yet."))
+        parts_rec.append(render_recommendation_card("Best weekday", weekday_rows[0] if weekday_rows else None, "No reliable weekday candidate yet."))
+        parts_rec.append(
+            "<div class='feature-card'>"
+            "<div class='feature-title'>Recommendation basis</div>"
+            f"<div class='feature-score'>{html.escape(basis_title)}</div>"
+            f"<div class='feature-note'>{html.escape(basis_detail)}</div>"
+            "<div class='feature-note'>Content strength still matters more than timing alone.</div>"
+            "</div>"
+        )
+        parts_rec.append("</div>")
+        parts_rec.append(
+            "<div class='panel table-panel' style='margin-top:18px'>"
+            "<h2>Suggested posting windows</h2>"
+            "<div class='hint'>Ranked timing candidates from posts already tracked in this database. Treat low-confidence rows as directional hints, not rules.</div>"
+            f"{render_recommendation_table('hour recommendations', hour_rows, 'Hour')}"
+            "</div>"
+        )
+        parts_rec.append(
+            "<div class='panel table-panel' style='margin-top:18px'>"
+            "<h2>Suggested weekdays</h2>"
+            "<div class='hint'>Weekday candidates use the same scoring basis as the hour recommendations.</div>"
+            f"{render_recommendation_table('weekday recommendations', weekday_rows, 'Weekday')}"
+            "</div>"
+        )
+        return "".join(parts_rec)
 
     def render_leaders_table(rows: List[sqlite3.Row]) -> str:
         if not rows:
@@ -1544,16 +1646,10 @@ def render_dashboard(
     parts.append(best_collection_card("Best art this week by collections", collection_period_summary['best_week'], collection_period_summary['week_label'], "No collection adds captured yet for the last 7 days."))
     parts.append("</div>")
 
+    parts.append(render_posting_recommendations(suggested_windows, suggested_weekdays))
+
     if collections_html:
         parts.append(collections_html)
-
-    parts.append(
-        "<div class='panel table-panel' style='margin-top:18px'>"
-        "<h2>Suggested posting windows</h2>"
-        "<div class='hint'>Advisory only. Based on your historical performance. Content strength still matters more than timing alone.</div>"
-        f"{render_windows_table(suggested_windows)}"
-        "</div>"
-    )
 
     parts.append("<div class='accordion-stack'>")
     parts.append(render_collapsible_section("Leaders by total reactions", render_leaders_table(by_total_reactions), "leaders", open_default=True))
