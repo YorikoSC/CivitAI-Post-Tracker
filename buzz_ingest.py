@@ -9,6 +9,19 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
+from collection_sync_state import (
+    count_collection_events,
+    ensure_collection_sync_schema,
+    read_collection_sync_state,
+    write_collection_sync_state,
+)
+from collection_runtime import (
+    compute_collection_mode,
+    compute_maintenance_start,
+    normalize_collection_tracking_config,
+    resolve_safe_collection_start,
+)
+
 import requests
 
 HOST_RED = "https://civitai.red"
@@ -18,8 +31,6 @@ CORE_TYPE_MAP = {
     "goodContent:image": "reaction_like",
     "collectedContent:image": "collection_like",
 }
-MAX_HISTORY_DAYS_HARD_CEILING = 365
-SYNC_STATE_KEY = "default"
 
 
 @dataclass
@@ -90,22 +101,6 @@ def init_content_engagement_schema(db_path: str) -> None:
             ON content_engagement_events(normalized_type)
             """
         )
-        cur.execute(
-            """
-            CREATE TABLE IF NOT EXISTS collection_sync_state (
-                sync_key TEXT PRIMARY KEY,
-                mode TEXT NOT NULL,
-                last_sync_at TEXT,
-                last_event_time_seen TEXT,
-                oldest_event_time_seen TEXT,
-                target_start_time TEXT,
-                coverage_complete INTEGER NOT NULL DEFAULT 0,
-                stop_reason TEXT,
-                pages_fetched_last_run INTEGER NOT NULL DEFAULT 0,
-                bootstrap_completed INTEGER NOT NULL DEFAULT 0
-            )
-            """
-        )
         conn.commit()
     finally:
         conn.close()
@@ -133,76 +128,12 @@ def get_oldest_content_engagement_event_time(db_path: str) -> Optional[str]:
         conn.close()
 
 
-def get_content_engagement_event_count(db_path: str) -> int:
-    if not Path(db_path).exists():
-        return 0
-    conn = sqlite3.connect(db_path)
-    try:
-        row = conn.execute("SELECT COUNT(*) FROM content_engagement_events").fetchone()
-        return int(row[0] or 0)
-    finally:
-        conn.close()
-
-
-def get_collection_sync_state(db_path: str) -> Dict[str, Any]:
-    if not Path(db_path).exists():
-        return {}
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.row_factory = sqlite3.Row
-        row = conn.execute(
-            "SELECT * FROM collection_sync_state WHERE sync_key = ?",
-            (SYNC_STATE_KEY,),
-        ).fetchone()
-        return dict(row) if row else {}
-    finally:
-        conn.close()
-
-
-def save_collection_sync_state(db_path: str, state: Dict[str, Any]) -> None:
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            INSERT INTO collection_sync_state (
-                sync_key, mode, last_sync_at, last_event_time_seen, oldest_event_time_seen,
-                target_start_time, coverage_complete, stop_reason, pages_fetched_last_run,
-                bootstrap_completed
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(sync_key) DO UPDATE SET
-                mode=excluded.mode,
-                last_sync_at=excluded.last_sync_at,
-                last_event_time_seen=excluded.last_event_time_seen,
-                oldest_event_time_seen=excluded.oldest_event_time_seen,
-                target_start_time=excluded.target_start_time,
-                coverage_complete=excluded.coverage_complete,
-                stop_reason=excluded.stop_reason,
-                pages_fetched_last_run=excluded.pages_fetched_last_run,
-                bootstrap_completed=excluded.bootstrap_completed
-            """,
-            (
-                SYNC_STATE_KEY,
-                state.get("mode", "maintenance"),
-                state.get("last_sync_at"),
-                state.get("last_event_time_seen"),
-                state.get("oldest_event_time_seen"),
-                state.get("target_start_time"),
-                1 if state.get("coverage_complete") else 0,
-                state.get("stop_reason"),
-                int(state.get("pages_fetched_last_run") or 0),
-                1 if state.get("bootstrap_completed") else 0,
-            ),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-
-
 def rebuild_collection_history(db_path: str) -> None:
     conn = sqlite3.connect(db_path)
     try:
         conn.execute("DELETE FROM content_engagement_events")
-        conn.execute("DELETE FROM collection_sync_state WHERE sync_key = ?", (SYNC_STATE_KEY,))
+        ensure_collection_sync_schema(conn)
+        conn.execute("DELETE FROM collection_sync_state")
         conn.commit()
     finally:
         conn.close()
@@ -226,7 +157,10 @@ def parse_iso_maybe(value: Optional[str]) -> Optional[datetime]:
     try:
         if value.endswith("Z"):
             value = value[:-1] + "+00:00"
-        return datetime.fromisoformat(value)
+        dt = datetime.fromisoformat(value)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
     except Exception:
         return None
 
@@ -312,25 +246,67 @@ def make_trpc_url(host: str, proc: str, payload: Dict[str, Any]) -> str:
     return f"{host.rstrip('/')}/api/trpc/{proc}?input={encoded}"
 
 
-def extract_response_root(resp_json: Dict[str, Any]) -> Dict[str, Any]:
-    root = resp_json.get("result", {}).get("data", {})
-    return root if isinstance(root, dict) else {}
+def get_batch_result(data: Any) -> Any:
+    if isinstance(data, list) and data:
+        return data[0]
+    return data
 
 
-def extract_transactions(resp_json: Dict[str, Any]) -> List[Dict[str, Any]]:
+def extract_trpc_data_node(resp_json: Any) -> Dict[str, Any]:
+    root = get_batch_result(resp_json)
+    if not isinstance(root, dict):
+        return {}
+
+    result = root.get("result")
+    if isinstance(result, dict):
+        data_node = result.get("data")
+        if isinstance(data_node, dict):
+            return data_node
+
+    data_node = root.get("data")
+    if isinstance(data_node, dict):
+        return data_node
+
+    return {}
+
+
+def extract_response_root(resp_json: Any) -> Dict[str, Any]:
+    data_node = extract_trpc_data_node(resp_json)
+    json_node = data_node.get("json")
+    if isinstance(json_node, dict):
+        return json_node
+
+    root = get_batch_result(resp_json)
+    if isinstance(root, dict):
+        result = root.get("result")
+        if isinstance(result, dict):
+            json_node = result.get("json")
+            if isinstance(json_node, dict):
+                return json_node
+        json_node = root.get("json")
+        if isinstance(json_node, dict):
+            return json_node
+
+    return data_node
+
+
+def extract_transactions(resp_json: Any) -> List[Dict[str, Any]]:
     root = extract_response_root(resp_json)
-    items = root.get("json", {}).get("transactions", [])
+    items = root.get("transactions")
+    if not isinstance(items, list):
+        items = root.get("items", [])
     return items if isinstance(items, list) else []
 
 
-def extract_next_cursor(resp_json: Dict[str, Any], transactions: List[Dict[str, Any]]) -> Optional[str]:
+def extract_next_cursor(resp_json: Any, transactions: List[Dict[str, Any]]) -> Optional[str]:
     root = extract_response_root(resp_json)
 
-    explicit = root.get("json", {}).get("nextCursor")
+    explicit = root.get("nextCursor")
     if isinstance(explicit, str) and parse_iso_maybe(explicit):
         return explicit
 
-    meta_cursor = root.get("meta", {}).get("values", {}).get("cursor")
+    data_node = extract_trpc_data_node(resp_json)
+    meta_cursor = data_node.get("meta", {}).get("values", {}).get("cursor")
     if isinstance(meta_cursor, list) and meta_cursor:
         first = meta_cursor[0]
         if isinstance(first, str) and parse_iso_maybe(first):
@@ -425,24 +401,6 @@ def core_event_from_transaction(tx: Dict[str, Any], host: str, account_type: str
     }
 
 
-def clamp_int(value: Any, default: int, minimum: int, maximum: int) -> int:
-    try:
-        value = int(value)
-    except Exception:
-        value = default
-    return max(minimum, min(maximum, value))
-
-
-def resolve_target_start_time(config: Dict[str, Any], max_history_days: int) -> datetime:
-    safe_floor = utc_now() - timedelta(days=max_history_days)
-    start_date = _cfg_get(config, "start_date", "startDate", ("tracking", "start_date"))
-    parsed = parse_iso_maybe(str(start_date)) if start_date else None
-    if parsed is not None:
-        parsed_utc = parsed.astimezone(timezone.utc)
-        return max(parsed_utc, safe_floor)
-    return safe_floor
-
-
 # ------------------------------
 # Network
 # ------------------------------
@@ -457,7 +415,7 @@ def call_buzz_transactions_page(
     end_iso: str,
     cursor: Optional[str],
     timeout_seconds: int,
-) -> Tuple[Dict[str, Any], List[Dict[str, Any]], Optional[str], str]:
+) -> Tuple[Any, List[Dict[str, Any]], Optional[str], str]:
     payload = build_transaction_input(account_type, start_iso, end_iso, cursor)
     url = make_trpc_url(host, TRPC_PROC, payload)
     headers = {
@@ -530,6 +488,31 @@ def insert_content_engagement_events(db_path: str, events: Iterable[Dict[str, An
         conn.close()
 
 
+def summarize_transaction_page(transactions: List[Dict[str, Any]], next_cursor: Optional[str]) -> Dict[str, Any]:
+    raw_type_counts: Dict[str, int] = {}
+    dates: List[str] = []
+    for tx in transactions:
+        if not isinstance(tx, dict):
+            continue
+        date = tx.get("date")
+        if isinstance(date, str) and date:
+            dates.append(date)
+        details = tx.get("details") or {}
+        if not isinstance(details, dict):
+            details = {}
+        raw_type = details.get("type")
+        if isinstance(raw_type, str) and raw_type:
+            raw_type_counts[raw_type] = raw_type_counts.get(raw_type, 0) + 1
+
+    return {
+        "transaction_count": len(transactions),
+        "first_transaction_date": dates[0] if dates else None,
+        "last_transaction_date": dates[-1] if dates else None,
+        "next_cursor": next_cursor,
+        "raw_type_counts": raw_type_counts,
+    }
+
+
 def _run_transactions_pass(
     session: requests.Session,
     *,
@@ -551,6 +534,7 @@ def _run_transactions_pass(
     captured_at = iso_z(utc_now())
     oldest_event_time_seen: Optional[str] = None
     latest_event_time_seen: Optional[str] = None
+    page_summaries: List[Dict[str, Any]] = []
 
     start_iso = iso_z(start_dt)
     end_iso = iso_z(end_dt)
@@ -568,6 +552,8 @@ def _run_transactions_pass(
         )
         pages_fetched += 1
         last_page_url = request_url
+        if len(page_summaries) < 2:
+            page_summaries.append(summarize_transaction_page(transactions, next_cursor))
 
         if not transactions:
             stop_reason = "source_exhausted"
@@ -622,6 +608,7 @@ def _run_transactions_pass(
         "type_counts": type_counts,
         "last_cursor": cursor,
         "last_page_url": last_page_url,
+        "page_summaries": page_summaries,
         "stop_reason": stop_reason,
         "coverage_complete": coverage_complete,
         "target_start_time": iso_z(stop_at_target_dt),
@@ -630,52 +617,37 @@ def _run_transactions_pass(
     }
 
 
-def determine_collection_mode(cfg: BuzzIngestConfig) -> Tuple[str, Dict[str, Any]]:
-    state = get_collection_sync_state(cfg.db_path)
-    count = get_content_engagement_event_count(cfg.db_path)
-    if count == 0:
-        return "bootstrap", state
-    if not state:
-        return "bootstrap", state
-    if not bool(state.get("bootstrap_completed")):
-        return "bootstrap", state
-    state_target = parse_iso_maybe(state.get("target_start_time"))
-    requested_target = parse_iso_maybe(cfg.target_start_time)
-    if requested_target and state_target and requested_target < state_target:
-        return "bootstrap", state
-    return "maintenance", state
-
-
 def run_b2_1_ingest(config: Dict[str, Any], db_path: str) -> Dict[str, Any]:
-    username = str(_cfg_get(config, "username", ("profile", "username"), default="")).strip()
+    username = str(
+        _cfg_get(
+            config,
+            "username",
+            ("profile", "username"),
+            default="",
+        )
+    ).strip()
     if not username:
         raise ValueError("username is required for B2.1 buzz ingest")
 
     api_key = read_api_key_from_config(config)
     host = infer_host_from_config(config)
 
-    account_type = str(_cfg_get(config, "buzz_account_type", ("collection_tracking", "account_type"), default="blue")).strip() or "blue"
-    overlap_hours = clamp_int(_cfg_get(config, "buzz_overlap_hours", ("collection_tracking", "overlap_hours"), default=24), 24, 0, 168)
-    bootstrap_max_pages = clamp_int(_cfg_get(config, "buzz_bootstrap_max_pages", ("collection_tracking", "bootstrap_max_pages"), ("collection_tracking", "max_pages"), default=100), 100, 1, 500)
-    maintenance_max_pages = clamp_int(_cfg_get(config, "buzz_maintenance_max_pages", ("collection_tracking", "maintenance_max_pages"), default=10), 10, 1, 100)
-    max_history_days = clamp_int(_cfg_get(config, "buzz_max_history_days", ("collection_tracking", "max_history_days"), ("collection_tracking", "backfill_days"), default=120), 120, 1, MAX_HISTORY_DAYS_HARD_CEILING)
-    timeout_seconds = clamp_int(_cfg_get(config, "http_timeout_seconds", "buzz_http_timeout_seconds", ("collection_tracking", "http_timeout_seconds"), default=60), 60, 5, 300)
-
-    target_start_dt = resolve_target_start_time(config, max_history_days)
+    collection_cfg = normalize_collection_tracking_config(config)
 
     runtime_cfg = BuzzIngestConfig(
         username=username,
         api_key=api_key,
         db_path=db_path,
         host=host,
-        account_type=account_type,
-        overlap_hours=overlap_hours,
-        bootstrap_max_pages=bootstrap_max_pages,
-        maintenance_max_pages=maintenance_max_pages,
-        max_history_days=max_history_days,
-        timeout_seconds=timeout_seconds,
-        target_start_time=iso_z(target_start_dt),
+        account_type=str(collection_cfg.get("account_type", "blue")),
+        overlap_hours=int(collection_cfg.get("overlap_hours", 24)),
+        bootstrap_max_pages=int(collection_cfg.get("bootstrap_max_pages", 100)),
+        maintenance_max_pages=int(collection_cfg.get("maintenance_max_pages", 10)),
+        max_history_days=int(collection_cfg.get("max_history_days", 120)),
+        timeout_seconds=int(collection_cfg.get("http_timeout_seconds", 60)),
+        target_start_time=iso_z(resolve_safe_collection_start(config)),
     )
+
     return ingest_content_engagement(runtime_cfg)
 
 
@@ -684,11 +656,15 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
 
     latest_event_time = get_latest_content_engagement_event_time(cfg.db_path)
     oldest_event_time = get_oldest_content_engagement_event_time(cfg.db_path)
-    latest_dt = parse_iso_maybe(latest_event_time)
     oldest_dt = parse_iso_maybe(oldest_event_time)
     target_start_dt = parse_iso_maybe(cfg.target_start_time) or (utc_now() - timedelta(days=cfg.max_history_days))
 
-    mode, state = determine_collection_mode(cfg)
+    with sqlite3.connect(cfg.db_path) as conn:
+        ensure_collection_sync_schema(conn)
+        state = read_collection_sync_state(conn) or {}
+        existing_event_count = count_collection_events(conn)
+
+    mode = compute_collection_mode(existing_event_count, state, cfg.target_start_time)
     now_dt = utc_now()
 
     if mode == "bootstrap":
@@ -698,9 +674,11 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
         if end_dt < start_dt:
             end_dt = start_dt
     else:
-        start_dt = latest_dt - timedelta(hours=cfg.overlap_hours) if latest_dt else target_start_dt
-        if start_dt < target_start_dt:
-            start_dt = target_start_dt
+        start_dt = compute_maintenance_start(
+            state.get("last_event_time_seen") or latest_event_time,
+            cfg.overlap_hours,
+            target_start_dt,
+        )
         end_dt = now_dt
         max_pages = cfg.maintenance_max_pages
 
@@ -718,20 +696,19 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
     if mode == "bootstrap":
         bootstrap_completed = bool(back.get("coverage_complete"))
 
-    save_collection_sync_state(
-        cfg.db_path,
-        {
-            "mode": "maintenance" if bootstrap_completed else "bootstrap",
-            "last_sync_at": back.get("captured_at"),
-            "last_event_time_seen": back.get("latest_event_time_seen") or latest_event_time,
-            "oldest_event_time_seen": back.get("oldest_event_time_seen") or oldest_event_time,
-            "target_start_time": back.get("target_start_time"),
-            "coverage_complete": bool(back.get("coverage_complete")),
-            "stop_reason": back.get("stop_reason"),
-            "pages_fetched_last_run": back.get("pages_fetched", 0),
-            "bootstrap_completed": bootstrap_completed,
-        },
-    )
+    with sqlite3.connect(cfg.db_path) as conn:
+        write_collection_sync_state(
+            conn,
+            mode="maintenance" if bootstrap_completed else "bootstrap",
+            bootstrap_completed=bootstrap_completed,
+            last_sync_at=back.get("captured_at"),
+            last_event_time_seen=back.get("latest_event_time_seen") or latest_event_time,
+            oldest_event_time_seen=back.get("oldest_event_time_seen") or oldest_event_time,
+            target_start_time=back.get("target_start_time"),
+            coverage_complete=bool(back.get("coverage_complete")),
+            stop_reason=back.get("stop_reason"),
+            pages_fetched_last_run=int(back.get("pages_fetched", 0)),
+        )
 
     return {
         "ok": True,
@@ -751,6 +728,7 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
         "type_counts": back.get("type_counts", {}),
         "last_cursor": back.get("last_cursor"),
         "last_page_url": back.get("last_page_url"),
+        "page_summaries": back.get("page_summaries", []),
         "stop_reason": back.get("stop_reason"),
         "coverage_complete": bool(back.get("coverage_complete")),
         "target_start_time": back.get("target_start_time"),

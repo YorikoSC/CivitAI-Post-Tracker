@@ -6,6 +6,8 @@ hiddenimports = [
     'pystray._win32',
     'PIL._tkinter_finder',
     'buzz_ingest',
+    'collection_runtime',
+    'collection_sync_state',
     'engagement_correlation',
     'engagement_dashboard',
 ]

@@ -712,11 +712,13 @@ class TrackerApp(tk.Tk):
 
     def open_dashboard(self):
         cfg = load_json_config(self.config_path) if self.config_path.exists() else default_config()
-        html_path = self.runtime_dir / deep_get(cfg, "paths.html", "dashboard.html")
+        configured_path = Path(str(deep_get(cfg, "paths.html", "dashboard.html") or "dashboard.html")).expanduser()
+        html_path = configured_path if configured_path.is_absolute() else self.runtime_dir / configured_path
         if not html_path.exists():
             messagebox.showinfo("Dashboard", f"Dashboard file not found:\n{html_path}")
             return
-        webbrowser.open(html_path.resolve().as_uri())
+        version = int(html_path.stat().st_mtime)
+        webbrowser.open(f"{html_path.resolve().as_uri()}?v={version}")
 
     def open_data_folder(self):
         self._open_path(self.runtime_dir)
