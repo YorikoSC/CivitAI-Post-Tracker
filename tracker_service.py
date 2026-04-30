@@ -942,6 +942,87 @@ def summarize_reaction_periods(
     }
 
 
+def summarize_collection_periods(
+    conn: sqlite3.Connection,
+    tz_helper: TimezoneHelper,
+    current_posts: List[sqlite3.Row],
+) -> Dict[str, Any]:
+    current_by_post = {int(r["post_id"]): r for r in current_posts}
+    now_local = utc_now().astimezone(tz_helper.tz)
+    today_date = now_local.date()
+    week_cutoff = now_local - timedelta(days=7)
+
+    today_total = 0
+    week_total = 0
+    by_post_today: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"count": 0, "images": set(), "title": None})
+    by_post_week: Dict[int, Dict[str, Any]] = defaultdict(lambda: {"count": 0, "images": set(), "title": None})
+
+    try:
+        rows = conn.execute(
+            """
+            SELECT event_time, related_post_id, COALESCE(related_image_id, target_id) AS image_id
+            FROM content_engagement_events
+            WHERE normalized_type = 'collection_like'
+            ORDER BY event_time DESC
+            """
+        ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    for row in rows:
+        event_dt = tz_helper.parse_iso(row["event_time"])
+        if event_dt is None:
+            continue
+        local_dt = event_dt.astimezone(tz_helper.tz)
+        post_id = row["related_post_id"]
+        image_id = row["image_id"]
+
+        if local_dt.date() == today_date:
+            today_total += 1
+            if post_id is not None:
+                post_key = int(post_id)
+                by_post_today[post_key]["count"] += 1
+                by_post_today[post_key]["title"] = current_by_post.get(post_key)["title"] if post_key in current_by_post else None
+                if image_id is not None:
+                    by_post_today[post_key]["images"].add(int(image_id))
+
+        if local_dt >= week_cutoff:
+            week_total += 1
+            if post_id is not None:
+                post_key = int(post_id)
+                by_post_week[post_key]["count"] += 1
+                by_post_week[post_key]["title"] = current_by_post.get(post_key)["title"] if post_key in current_by_post else None
+                if image_id is not None:
+                    by_post_week[post_key]["images"].add(int(image_id))
+
+    def finalize_best(bucket: Dict[int, Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        best = None
+        for post_id, data in bucket.items():
+            total = int(data.get("count") or 0)
+            if total <= 0:
+                continue
+            candidate = {
+                "post_id": post_id,
+                "title": data.get("title") or (current_by_post.get(post_id)["title"] if post_id in current_by_post else None),
+                "total": total,
+                "distinct_images": len(data.get("images") or []),
+            }
+            if best is None or (candidate["total"], candidate["distinct_images"], candidate["post_id"]) > (
+                best["total"], best["distinct_images"], best["post_id"]
+            ):
+                best = candidate
+        return best
+
+    return {
+        "today_total": today_total,
+        "week_total": week_total,
+        "best_today": finalize_best(by_post_today),
+        "best_week": finalize_best(by_post_week),
+        "today_label": str(today_date),
+        "week_label": f"Last 7 days ending {now_local.strftime('%Y-%m-%d %H:%M %Z')}",
+    }
+
+
 def select_suggested_windows(hour_summary: List[dict]) -> List[dict]:
     candidates = [row for row in hour_summary if row.get("posts", 0) >= 3 and row.get("avg_24h_reactions") is not None]
     candidates.sort(key=lambda r: (float(r.get("avg_24h_reactions") or 0), float(r.get("avg_2h_reactions") or 0), int(r.get("posts") or 0)), reverse=True)
@@ -1079,6 +1160,7 @@ def render_dashboard(
     deltas = load_post_deltas(conn)
     hour_summary, weekday_summary = build_hour_and_weekday_summaries(current_posts, tz_helper, snapshots_by_post)
     period_summary = summarize_reaction_periods(deltas, tz_helper, current_posts)
+    collection_period_summary = summarize_collection_periods(conn, tz_helper, current_posts)
     suggested_windows = select_suggested_windows(hour_summary)
 
     tracked_posts = len(current_posts)
@@ -1086,7 +1168,7 @@ def render_dashboard(
     unknown_totals = tracked_posts - known_totals
     latest_capture = current_posts[0]["captured_at"] if current_posts else None
     runtime_status = load_runtime_status(runtime_status_path)
-    collections_html = render_collection_dashboard_section(db_path) if db_path else ""
+    collections_html = render_collection_dashboard_section(db_path, view_host=view_host, time_formatter=tz_helper.fmt_dt) if db_path else ""
 
     known_rows = [r for r in current_posts if r["stats_known"]]
     by_total_reactions = sorted(known_rows, key=lambda r: (int(r["reaction_total"] or 0), int(r["heart_count"] or 0), int(r["post_id"])), reverse=True)[:15]
@@ -1164,7 +1246,7 @@ def render_dashboard(
             "</div>"
         )
 
-    def best_post_card(title: str, payload: Optional[Dict[str, Any]], subtitle: str, empty_text: str) -> str:
+    def best_reaction_card(title: str, payload: Optional[Dict[str, Any]], subtitle: str, empty_text: str) -> str:
         if not payload:
             return (
                 "<div class='feature-card'>"
@@ -1184,6 +1266,30 @@ def render_dashboard(
             f"<div class='feature-post'>{heading}</div>"
             f"<div class='feature-note'>{post_title}</div>"
             f"{reaction_group(payload['like'], payload['heart'], payload['laugh'], payload['cry'])}"
+            "</div>"
+        )
+
+    def best_collection_card(title: str, payload: Optional[Dict[str, Any]], subtitle: str, empty_text: str) -> str:
+        if not payload:
+            return (
+                "<div class='feature-card'>"
+                f"<div class='feature-title'>{html.escape(title)}</div>"
+                f"<div class='feature-sub'>{html.escape(subtitle)}</div>"
+                "<div class='empty-state'>—</div>"
+                f"<div class='feature-note'>{html.escape(empty_text)}</div>"
+                "</div>"
+            )
+        heading = post_link(view_host, int(payload["post_id"]))
+        post_title = html.escape(payload.get("title") or "Untitled post")
+        image_count = int(payload.get("distinct_images") or 0)
+        return (
+            "<div class='feature-card'>"
+            f"<div class='feature-title'>{html.escape(title)}</div>"
+            f"<div class='feature-sub'>{html.escape(subtitle)}</div>"
+            f"<div class='feature-score'>{int(payload['total'])}</div>"
+            f"<div class='feature-post'>{heading}</div>"
+            f"<div class='feature-note'>{post_title}</div>"
+            f"<div class='feature-note'>{image_count} affected image{'s' if image_count != 1 else ''}</div>"
             "</div>"
         )
 
@@ -1297,6 +1403,8 @@ def render_dashboard(
     runtime_connected = bool(runtime_status)
 
     today = period_summary['today_totals']
+    today_reaction_total = int(today["like"] or 0) + int(today["heart"] or 0) + int(today["laugh"] or 0) + int(today["cry"] or 0)
+    today_collection_total = int(collection_period_summary.get("today_total") or 0)
 
     hour_rows = [[html.escape(str(r['hour'])), str(r['posts']), fmt_num(r['avg_2h_reactions']), fmt_num(r['avg_24h_reactions']), fmt_num(r['avg_total_reactions']), fmt_num(r['avg_total_engagement']), chip(r['confidence'])] for r in hour_summary]
     weekday_rows = [[html.escape(str(r['weekday'])), str(r['posts']), fmt_num(r['avg_2h_reactions']), fmt_num(r['avg_24h_reactions']), fmt_num(r['avg_total_reactions']), fmt_num(r['avg_total_engagement']), chip(r['confidence'])] for r in weekday_summary]
@@ -1322,14 +1430,15 @@ def render_dashboard(
     .section-title{margin:24px 0 12px;font-size:12px;letter-spacing:.12em;text-transform:uppercase;color:var(--muted)}
     .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.metric-card,.panel,.feature-card{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
     .metric-card{padding:18px;min-height:146px}.metric-label{font-size:13px;color:var(--muted);margin-bottom:10px}.metric-value{font-size:22px;font-weight:800;line-height:1.25}.metric-detail{margin-top:12px;font-size:12px;color:var(--muted)}
-    .feature-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:16px;margin-top:18px}.feature-card{padding:18px;min-height:185px}.feature-title{font-size:22px;font-weight:700;margin-bottom:6px}.feature-sub{font-size:12px;color:var(--muted);margin-bottom:14px}.feature-score{font-size:38px;font-weight:800;margin-bottom:10px}.feature-post{font-size:16px;font-weight:700;margin-bottom:8px}.feature-note{font-size:13px;color:var(--muted);line-height:1.45}.empty-state{font-size:34px;font-weight:800;margin:18px 0 8px}
+    .feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}.feature-card{padding:18px;min-height:185px}.feature-title{font-size:22px;font-weight:700;margin-bottom:6px}.feature-sub{font-size:12px;color:var(--muted);margin-bottom:14px}.feature-score{font-size:38px;font-weight:800;margin-bottom:10px;font-variant-numeric:tabular-nums}.feature-post{font-size:16px;font-weight:700;margin-bottom:8px}.feature-note{font-size:13px;color:var(--muted);line-height:1.45}.empty-state{font-size:34px;font-weight:800;margin:18px 0 8px}
     .reaction-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.reaction-stat{background:#10182b;border:1px solid #31446f;border-radius:14px;padding:14px}.reaction-head{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.reaction-value{margin-top:10px;font-size:34px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
     .rgroup{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}.rbadge{display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;background:#10182b;border:1px solid #31446f;border-radius:999px;padding:5px 9px;box-sizing:border-box}.ricon{font-size:14px;line-height:1}.rnum{font-weight:700;font-variant-numeric:tabular-nums;font-size:14px}
     .chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:#1e2742;color:#d8e5ff;border:1px solid transparent}.chip.good{background:rgba(46,160,67,.15);color:#7ee787;border-color:rgba(46,160,67,.35)}.chip.mid{background:rgba(56,139,253,.16);color:#9cc3ff;border-color:rgba(56,139,253,.35)}.chip.warn{background:rgba(210,153,34,.16);color:#f2cc60;border-color:rgba(210,153,34,.35)}.chip.na{background:rgba(91,101,127,.18);color:#c8d1e8;border-color:rgba(91,101,127,.35)}
-    .panel{padding:18px}.panel h2{margin:0 0 8px;font-size:18px}.panel .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}.clean-table{width:100%;border-collapse:collapse}.clean-table th,.clean-table td{padding:12px 10px;border-bottom:1px solid var(--border);text-align:center;vertical-align:top}.clean-table th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted)}.clean-table td.num,.clean-table th.num{text-align:center}.table-panel{overflow:auto}
+    .panel{padding:18px}.panel h2{margin:0 0 8px;font-size:18px}.panel .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}.clean-table{width:100%;border-collapse:collapse}.clean-table th,.clean-table td{padding:12px 10px;border-bottom:1px solid var(--border);text-align:center;vertical-align:top}.clean-table th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer;user-select:none}.clean-table th.sort-asc,.clean-table th.sort-desc{color:var(--accent)}.clean-table td.num,.clean-table th.num{text-align:center}.table-panel{overflow:auto}
     .accordion-stack{display:grid;grid-template-columns:1fr;gap:16px;margin-top:18px}.accordion-panel{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.accordion-panel[open]{overflow:visible}.acc-summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:16px 18px;user-select:none}.acc-summary::-webkit-details-marker{display:none}.acc-title{font-size:18px;font-weight:700}.acc-icon{width:12px;height:12px;position:relative;flex:0 0 12px}.acc-icon::before,.acc-icon::after{content:'';position:absolute;background:var(--muted);border-radius:2px;transition:transform .18s ease,opacity .18s ease}.acc-icon::before{left:0;right:0;top:5px;height:2px}.acc-icon::after{top:0;bottom:0;left:5px;width:2px}.accordion-panel[open] .acc-icon::after{opacity:0;transform:scaleY(.2)}.acc-body{padding:0 18px 18px}.acc-hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}
-    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}.small-note{margin-top:14px;color:var(--muted);font-size:12px}
-    @media (max-width:1100px){.feature-grid,.reaction-row{grid-template-columns:1fr}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}}
+    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}.row-sub{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.35}.small-note{margin-top:14px;color:var(--muted);font-size:12px}
+    @media (max-width:1300px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+    @media (max-width:900px){.feature-grid,.reaction-row{grid-template-columns:1fr}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}}
     """
 
     generated_at = utc_now_iso()
@@ -1344,6 +1453,38 @@ def render_dashboard(
     parts.append(
         f"<script>function refreshNow(){{location.reload();}}setInterval(function(){{location.reload();}}, {refresh_seconds*1000});"
         "document.addEventListener('DOMContentLoaded', function(){"
+        "function sortValue(text){"
+        "text=(text||'').trim().replace(/^#/, '');"
+        "if(text==='—'||text==='n/a'||text==='') return {kind:'empty', value:''};"
+        "var numeric=text.replace(/[, ]/g,'');"
+        "if(/^[-+]?\\d+(\\.\\d+)?$/.test(numeric)) return {kind:'number', value:parseFloat(numeric)};"
+        "var localDate=text.match(/^(\\d{4})-(\\d{2})-(\\d{2})\\s+(\\d{2}):(\\d{2})/);"
+        "if(localDate) return {kind:'date', value:Date.UTC(+localDate[1], +localDate[2]-1, +localDate[3], +localDate[4], +localDate[5])};"
+        "var parsed=Date.parse(text);"
+        "if(!Number.isNaN(parsed)) return {kind:'date', value:parsed};"
+        "return {kind:'text', value:text.toLowerCase()};"
+        "}"
+        "document.querySelectorAll('table.clean-table').forEach(function(table){"
+        "var headers=table.querySelectorAll('thead th');"
+        "headers.forEach(function(th,index){"
+        "th.addEventListener('click', function(){"
+        "var tbody=table.querySelector('tbody'); if(!tbody) return;"
+        "var rows=Array.from(tbody.querySelectorAll('tr'));"
+        "var nextDir=th.classList.contains('sort-asc') ? 'desc' : 'asc';"
+        "headers.forEach(function(h){h.classList.remove('sort-asc','sort-desc');});"
+        "th.classList.add(nextDir==='asc' ? 'sort-asc' : 'sort-desc');"
+        "rows.sort(function(a,b){"
+        "var av=sortValue((a.children[index]||{}).textContent);"
+        "var bv=sortValue((b.children[index]||{}).textContent);"
+        "var cmp=0;"
+        "if(av.kind===bv.kind && (av.kind==='number'||av.kind==='date')) cmp=av.value-bv.value;"
+        "else cmp=String(av.value).localeCompare(String(bv.value), undefined, {numeric:true, sensitivity:'base'});"
+        "return nextDir==='asc' ? cmp : -cmp;"
+        "});"
+        "rows.forEach(function(row){tbody.appendChild(row);});"
+        "});"
+        "});"
+        "});"
         "document.querySelectorAll('details[data-acc-id]').forEach(function(el){"
         "var key='civitaiTrackerAcc:'+el.dataset.accId;"
         "var saved=localStorage.getItem(key);"
@@ -1379,20 +1520,28 @@ def render_dashboard(
     if known_totals == 0:
         parts.append("<div class='panel' style='border-color:#7a3a3a;background:#2a1b1b'><h2>Totals unavailable</h2><div class='hint'>The tracker found posts, but none of the latest snapshots have usable stats. Keep collecting snapshots or verify the tRPC response shape again.</div></div>")
 
+    parts.append("<div class='section-title'>Monitoring overview</div>")
     parts.append("<div class='feature-grid'>")
     parts.append(
         "<div class='feature-card'>"
-        "<div class='feature-title'>Reactions today by type</div>"
+        "<div class='feature-title'>Reactions today</div>"
         f"<div class='feature-sub'>Local day: {html.escape(period_summary['today_label'])}</div>"
-        "<div class='reaction-row'>"
-        f"{reaction_stat('👍', 'Likes', today['like'])}"
-        f"{reaction_stat('❤️', 'Hearts', today['heart'])}"
-        f"{reaction_stat('😂', 'Laughs', today['laugh'])}"
-        f"{reaction_stat('😢', 'Cries', today['cry'])}"
-        "</div></div>"
+        f"<div class='feature-score'>{today_reaction_total}</div>"
+        f"{reaction_group(today['like'], today['heart'], today['laugh'], today['cry'])}"
+        "</div>"
     )
-    parts.append(best_post_card("Best post today", period_summary['best_today'], period_summary['today_label'], "No reaction gains captured yet for today."))
-    parts.append(best_post_card("Best post this week", period_summary['best_week'], period_summary['week_label'], "No reaction gains captured yet for the last 7 days."))
+    parts.append(
+        "<div class='feature-card'>"
+        "<div class='feature-title'>Collections today</div>"
+        f"<div class='feature-sub'>Local day: {html.escape(collection_period_summary['today_label'])}</div>"
+        f"<div class='feature-score'>{today_collection_total}</div>"
+        "<div class='feature-note'>New collection adds detected today.</div>"
+        "</div>"
+    )
+    parts.append(best_reaction_card("Best art today by reactions", period_summary['best_today'], period_summary['today_label'], "No reaction gains captured yet for today."))
+    parts.append(best_collection_card("Best art today by collections", collection_period_summary['best_today'], collection_period_summary['today_label'], "No collection adds captured yet for today."))
+    parts.append(best_reaction_card("Best art this week by reactions", period_summary['best_week'], period_summary['week_label'], "No reaction gains captured yet for the last 7 days."))
+    parts.append(best_collection_card("Best art this week by collections", collection_period_summary['best_week'], collection_period_summary['week_label'], "No collection adds captured yet for the last 7 days."))
     parts.append("</div>")
 
     if collections_html:

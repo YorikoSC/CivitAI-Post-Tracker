@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 import sqlite3
-from typing import Any, Dict, List, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from collection_sync_state import read_collection_sync_state
 
@@ -59,14 +59,26 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
         recent_rows = _fetch_all(
             conn,
             """
+            WITH latest_posts AS (
+                SELECT s.*
+                FROM post_snapshots s
+                JOIN (
+                    SELECT post_id, MAX(id) AS max_id
+                    FROM post_snapshots
+                    GROUP BY post_id
+                ) latest ON latest.max_id = s.id
+            )
             SELECT
-                event_time,
-                COALESCE(related_image_id, target_id) AS image_id,
-                related_post_id,
-                by_user_id
-            FROM content_engagement_events
-            WHERE normalized_type = 'collection_like'
-            ORDER BY event_time DESC
+                cee.event_time,
+                COALESCE(cee.related_image_id, cee.target_id) AS image_id,
+                cee.related_post_id,
+                cee.by_user_id,
+                latest_posts.title,
+                latest_posts.published_at
+            FROM content_engagement_events cee
+            LEFT JOIN latest_posts ON latest_posts.post_id = cee.related_post_id
+            WHERE cee.normalized_type = 'collection_like'
+            ORDER BY cee.event_time DESC
             LIMIT ?
             """,
             (recent_limit,),
@@ -75,15 +87,28 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
         top_posts_rows = _fetch_all(
             conn,
             """
+            WITH latest_posts AS (
+                SELECT s.*
+                FROM post_snapshots s
+                JOIN (
+                    SELECT post_id, MAX(id) AS max_id
+                    FROM post_snapshots
+                    GROUP BY post_id
+                ) latest ON latest.max_id = s.id
+            )
             SELECT
-                related_post_id,
+                cee.related_post_id,
                 COUNT(*) AS collection_adds,
-                COUNT(DISTINCT COALESCE(related_image_id, target_id)) AS distinct_images_affected
-            FROM content_engagement_events
-            WHERE normalized_type = 'collection_like'
-              AND related_post_id IS NOT NULL
-            GROUP BY related_post_id
-            ORDER BY collection_adds DESC, related_post_id DESC
+                COUNT(DISTINCT COALESCE(cee.related_image_id, cee.target_id)) AS distinct_images_affected,
+                MAX(cee.event_time) AS last_event_time,
+                latest_posts.title,
+                latest_posts.published_at
+            FROM content_engagement_events cee
+            LEFT JOIN latest_posts ON latest_posts.post_id = cee.related_post_id
+            WHERE cee.normalized_type = 'collection_like'
+              AND cee.related_post_id IS NOT NULL
+            GROUP BY cee.related_post_id, latest_posts.title, latest_posts.published_at
+            ORDER BY collection_adds DESC, cee.related_post_id DESC
             LIMIT ?
             """,
             (top_limit,),
@@ -92,13 +117,25 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
         top_images_rows = _fetch_all(
             conn,
             """
+            WITH latest_posts AS (
+                SELECT s.*
+                FROM post_snapshots s
+                JOIN (
+                    SELECT post_id, MAX(id) AS max_id
+                    FROM post_snapshots
+                    GROUP BY post_id
+                ) latest ON latest.max_id = s.id
+            )
             SELECT
-                COALESCE(related_image_id, target_id) AS image_id,
-                MAX(related_post_id) AS related_post_id,
-                COUNT(*) AS collection_adds
-            FROM content_engagement_events
-            WHERE normalized_type = 'collection_like'
-            GROUP BY COALESCE(related_image_id, target_id)
+                COALESCE(cee.related_image_id, cee.target_id) AS image_id,
+                MAX(cee.related_post_id) AS related_post_id,
+                COUNT(*) AS collection_adds,
+                MAX(cee.event_time) AS last_event_time,
+                latest_posts.title
+            FROM content_engagement_events cee
+            LEFT JOIN latest_posts ON latest_posts.post_id = cee.related_post_id
+            WHERE cee.normalized_type = 'collection_like'
+            GROUP BY COALESCE(cee.related_image_id, cee.target_id), latest_posts.title
             ORDER BY collection_adds DESC, image_id DESC
             LIMIT ?
             """,
@@ -118,6 +155,8 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                     "image_id": row[1],
                     "post_id": row[2],
                     "by_user_id": row[3],
+                    "title": row[4],
+                    "published_at": row[5],
                 }
                 for row in recent_rows
             ],
@@ -126,6 +165,9 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                     "post_id": row[0],
                     "collection_adds": row[1],
                     "distinct_images_affected": row[2],
+                    "last_event_time": row[3],
+                    "title": row[4],
+                    "published_at": row[5],
                 }
                 for row in top_posts_rows
             ],
@@ -134,6 +176,8 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                     "image_id": row[0],
                     "post_id": row[1],
                     "collection_adds": row[2],
+                    "last_event_time": row[3],
+                    "title": row[4],
                 }
                 for row in top_images_rows
             ],
@@ -163,6 +207,14 @@ def _fmt(value: Any) -> str:
     return html.escape(str(value))
 
 
+def _fmt_time(value: Any, time_formatter: Optional[Callable[[Optional[str]], str]] = None) -> str:
+    if value is None or value == "":
+        return "—"
+    if time_formatter:
+        return html.escape(time_formatter(str(value)))
+    return html.escape(str(value))
+
+
 def _metric_card(label: str, value: Any, detail: str) -> str:
     return (
         "<div class='metric-card'>"
@@ -173,7 +225,21 @@ def _metric_card(label: str, value: Any, detail: str) -> str:
     )
 
 
-def _render_clean_table(headers: List[str], rows: List[List[Any]], empty_text: str = "No data") -> str:
+def _post_link(view_host: str, post_id: int) -> str:
+    if not view_host:
+        return f"post #{int(post_id)}"
+    url = f"{view_host.rstrip('/')}/posts/{int(post_id)}"
+    return f'<a href="{html.escape(url)}" target="_blank" rel="noopener">post #{int(post_id)}</a>'
+
+
+def _post_cell(view_host: str, post_id: Any, title: Any = None) -> str:
+    if post_id in (None, ""):
+        return "<span class='chip na'>Unlinked image</span>"
+    title_text = html.escape(str(title or "Untitled post"))
+    return f"{_post_link(view_host, int(post_id))}<div class='row-sub'>{title_text}</div>"
+
+
+def _render_clean_table(headers: List[str], rows: List[List[Any]], empty_text: str = "No data", escape_cells: bool = True) -> str:
     head = "".join(f"<th>{html.escape(header)}</th>" for header in headers)
 
     if not rows:
@@ -181,23 +247,33 @@ def _render_clean_table(headers: List[str], rows: List[List[Any]], empty_text: s
     else:
         body_rows = []
         for row in rows:
-            body_rows.append("<tr>" + "".join(f"<td>{_fmt(cell)}</td>" for cell in row) + "</tr>")
+            if escape_cells:
+                cells = "".join(f"<td>{_fmt(cell)}</td>" for cell in row)
+            else:
+                cells = "".join(f"<td>{cell}</td>" for cell in row)
+            body_rows.append("<tr>" + cells + "</tr>")
         body = "".join(body_rows)
 
     return f"<table class='clean-table'><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
 
 
-def _render_panel_table(title: str, hint: str, headers: List[str], rows: List[List[Any]]) -> str:
+def _render_panel_table(title: str, hint: str, headers: List[str], rows: List[List[Any]], escape_cells: bool = True) -> str:
     return (
         "<div class='panel table-panel' style='margin-top:18px'>"
         f"<h2>{html.escape(title)}</h2>"
         f"<div class='hint'>{html.escape(hint)}</div>"
-        f"{_render_clean_table(headers, rows)}"
+        f"{_render_clean_table(headers, rows, escape_cells=escape_cells)}"
         "</div>"
     )
 
 
-def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, top_limit: int = 10) -> str:
+def render_collection_dashboard_section(
+    db_path: str,
+    recent_limit: int = 20,
+    top_limit: int = 10,
+    view_host: str = "",
+    time_formatter: Optional[Callable[[Optional[str]], str]] = None,
+) -> str:
     data = get_collection_dashboard_data(db_path, recent_limit=recent_limit, top_limit=top_limit)
 
     if not data.get("ok"):
@@ -235,17 +311,32 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
     state_hint = " · ".join(state_hint_parts)
 
     recent_rows = [
-        [item.get("event_time"), item.get("image_id"), item.get("post_id"), item.get("by_user_id")]
+        [
+            _fmt_time(item.get("event_time"), time_formatter),
+            _post_cell(view_host, item.get("post_id"), item.get("title")),
+            _fmt(item.get("image_id")),
+            _fmt(item.get("by_user_id")),
+        ]
         for item in data.get("recent_collection_adds", [])
     ]
 
     top_post_rows = [
-        [item.get("post_id"), item.get("collection_adds"), item.get("distinct_images_affected")]
+        [
+            _post_cell(view_host, item.get("post_id"), item.get("title")),
+            _fmt(item.get("collection_adds")),
+            _fmt(item.get("distinct_images_affected")),
+            _fmt_time(item.get("last_event_time"), time_formatter),
+        ]
         for item in data.get("top_posts_by_collection_adds", [])
     ]
 
     top_image_rows = [
-        [item.get("image_id"), item.get("post_id"), item.get("collection_adds")]
+        [
+            _fmt(item.get("image_id")),
+            _post_cell(view_host, item.get("post_id"), item.get("title")),
+            _fmt(item.get("collection_adds")),
+            _fmt_time(item.get("last_event_time"), time_formatter),
+        ]
         for item in data.get("top_images_by_collection_adds", [])
     ]
 
@@ -268,8 +359,9 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
         _render_panel_table(
             "Recent collection adds",
             "Latest detected additions of your images to collections.",
-            ["Time", "Image ID", "Post ID", "Actor ID"],
+            ["Time", "Post", "Image ID", "Actor ID"],
             recent_rows,
+            escape_cells=False,
         )
     )
 
@@ -277,8 +369,9 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
         _render_panel_table(
             "Top posts by collection adds",
             "Posts whose images were added to collections most often.",
-            ["Post ID", "Collection adds", "Distinct images"],
+            ["Post", "Collection adds", "Distinct images", "Last add"],
             top_post_rows,
+            escape_cells=False,
         )
     )
 
@@ -286,8 +379,9 @@ def render_collection_dashboard_section(db_path: str, recent_limit: int = 20, to
         _render_panel_table(
             "Top images by collection adds",
             "Images most often added to collections.",
-            ["Image ID", "Post ID", "Collection adds"],
+            ["Image ID", "Post", "Collection adds", "Last add"],
             top_image_rows,
+            escape_cells=False,
         )
     )
 
