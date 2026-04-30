@@ -1,0 +1,26 @@
+config.json
+api_key.txt
+*.db
+*.sqlite
+csv/
+dashboard.html
+runtime_status.json
+logs/
+probe_results/
+__pycache__/
+*.pyc
+.smoke_tmp/
+.venv/
+venv/
+dist/
+build/
+app.log
+core_last.log
+probe_results_transactions/
+
+# Assistant/private working notes
+PATCH_INSTRUCTIONS*.md
+REPO_UPDATE_NOTES.md
+RELEASE_CHECKLIST.md
+BUZZ_COLLECTIONS_B1_SPEC.md
+runtime_status.bak
