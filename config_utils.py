@@ -18,7 +18,7 @@ CONFIG_FILE = "config.json"
 EXAMPLE_CONFIG_FILE = "config.example.json"
 CURRENT_CONFIG_VERSION = 2
 AUTOSTART_SHORTCUT_NAME = "CivitAI Post Tracker.lnk"
-POWERSHELL_LAUNCHER_FILE = "launch_tracker.ps1"
+SOURCE_LAUNCHER_FILE = "launch_tracker.bat"
 TIMEZONE_EXAMPLES = [
     "UTC",
     "Europe/Moscow",
@@ -355,7 +355,7 @@ def autostart_shortcut_path() -> Path:
 
 
 def source_launcher_path(base_dir: str | Path = ".") -> Path:
-    return Path(base_dir).resolve() / POWERSHELL_LAUNCHER_FILE
+    return Path(base_dir).resolve() / SOURCE_LAUNCHER_FILE
 
 
 def autostart_enabled() -> bool:
@@ -403,7 +403,7 @@ def set_windows_autostart(enabled: bool, base_dir: str | Path = ".", start_minim
         return
 
     base_dir = Path(base_dir).resolve()
-    minimized_arg = " --minimized" if start_minimized else ""
+    minimized_arg = "--minimized" if start_minimized else ""
 
     if is_frozen_app():
         target = str(Path(sys.executable).resolve())
@@ -416,16 +416,8 @@ def set_windows_autostart(enabled: bool, base_dir: str | Path = ".", start_minim
     if not launcher.exists():
         raise FileNotFoundError(f"Source launcher not found: {launcher}")
 
-    target = "powershell.exe"
-    ps_args = [
-        "-NoProfile",
-        "-ExecutionPolicy", "Bypass",
-        "-WindowStyle", "Hidden",
-        "-File", str(launcher),
-    ]
-    if start_minimized:
-        ps_args.append("-Minimized")
-    arguments = " ".join(f'"{arg}"' if " " in arg else arg for arg in ps_args)
+    target = str(launcher)
+    arguments = minimized_arg
     _create_windows_shortcut(shortcut, target, arguments, str(base_dir), icon_location=target)
 
 

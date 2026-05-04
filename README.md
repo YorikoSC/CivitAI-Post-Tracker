@@ -17,7 +17,7 @@ v10.1 turns the dashboard into a monitoring workspace: post performance rows, la
 - Suggested posting windows based on historical performance
 - HTML dashboard with runtime status
 - Auto polling with tray support
-- Source mode launcher via PowerShell
+- Source mode launcher via Windows batch file
 - EXE build flow via PyInstaller (`onedir`)
 - Collection tracking for your images
 - Image-to-post correlation for collection events
@@ -67,16 +67,10 @@ python -m pip install -r requirements.txt
 3. Launch the app:
 
 ```powershell
-.\launch_tracker.ps1
-```
-
-If Windows blocks direct `.ps1` launch, use:
-
-```powershell
 .\launch_tracker.bat
 ```
 
-Or directly:
+For source debugging with the console visible:
 
 ```powershell
 python tracker_app.py

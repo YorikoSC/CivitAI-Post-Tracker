@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ctypes
 import os
 import queue
 import re
@@ -497,6 +498,8 @@ class TrackerApp(tk.Tk):
         launch_hidden = bool(minimized or deep_get(self.config_data, "options.start_minimized", False))
         if launch_hidden:
             self.after(350, self.hide_to_tray)
+        else:
+            self.after(350, self.show_from_tray)
 
         if deep_get(self.config_data, "options.start_auto_polling_on_launch", False):
             self.after(700 if launch_hidden else 450, self._start_auto_on_launch)
@@ -832,9 +835,43 @@ class TrackerApp(tk.Tk):
             self.state("normal")
         except Exception:
             pass
+        self._force_show_main_window()
         self.runner.set_app_mode("window")
         self.after(50, self.lift)
         self.after(100, self.focus_force)
+        self.after(150, self._force_show_main_window)
+
+    def _force_show_main_window(self):
+        if not sys.platform.startswith("win"):
+            return
+        try:
+            user32 = ctypes.windll.user32
+            handles: list[int] = []
+            raw_handles = [self.winfo_id()]
+            try:
+                raw_handles.append(self.wm_frame())
+            except Exception:
+                pass
+            for raw_handle in raw_handles:
+                try:
+                    hwnd = int(str(raw_handle), 0)
+                except (TypeError, ValueError):
+                    continue
+                if hwnd and hwnd not in handles:
+                    handles.append(hwnd)
+                try:
+                    root_hwnd = int(user32.GetAncestor(hwnd, 2))
+                    if root_hwnd and root_hwnd not in handles:
+                        handles.append(root_hwnd)
+                except Exception:
+                    pass
+            for hwnd in handles:
+                user32.ShowWindow(hwnd, 5)
+                user32.ShowWindow(hwnd, 9)
+                user32.SetWindowPos(hwnd, 0, 0, 0, 0, 0, 0x0043)
+                user32.SetForegroundWindow(hwnd)
+        except Exception:
+            pass
 
     def _on_close(self):
         self.hide_to_tray()
@@ -854,11 +891,25 @@ def build_parser():
     parser = argparse.ArgumentParser(description="CivitAI Tracker desktop app")
     parser.add_argument("--minimized", action="store_true", help="Start minimized to tray")
     parser.add_argument("--setup", action="store_true", help="Open settings immediately")
+    parser.add_argument("--hide-console", action="store_true", help=argparse.SUPPRESS)
     return parser
+
+
+def hide_console_window():
+    if not sys.platform.startswith("win"):
+        return
+    try:
+        console = ctypes.windll.kernel32.GetConsoleWindow()
+        if console:
+            ctypes.windll.user32.ShowWindow(console, 0)
+    except Exception:
+        pass
 
 
 def main():
     args = build_parser().parse_args()
+    if args.hide_console:
+        hide_console_window()
     app = TrackerApp(minimized=args.minimized)
     if args.setup:
         app.after(200, app.open_settings)
