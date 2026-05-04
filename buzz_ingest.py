@@ -422,7 +422,7 @@ def call_buzz_transactions_page(
         "Accept": "application/json",
         "Authorization": f"Bearer {api_key}",
         "Referer": f"{host.rstrip('/')}/user/transactions?accountType={account_type}",
-        "User-Agent": "CivitAI-Tracker-v10.0.1/1.0",
+        "User-Agent": "CivitAI-Tracker-v10.1/1.0",
     }
     resp = session.get(url, headers=headers, timeout=timeout_seconds)
     resp.raise_for_status()
@@ -659,10 +659,13 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
     oldest_dt = parse_iso_maybe(oldest_event_time)
     target_start_dt = parse_iso_maybe(cfg.target_start_time) or (utc_now() - timedelta(days=cfg.max_history_days))
 
-    with sqlite3.connect(cfg.db_path) as conn:
+    conn = sqlite3.connect(cfg.db_path)
+    try:
         ensure_collection_sync_schema(conn)
         state = read_collection_sync_state(conn) or {}
         existing_event_count = count_collection_events(conn)
+    finally:
+        conn.close()
 
     mode = compute_collection_mode(existing_event_count, state, cfg.target_start_time)
     now_dt = utc_now()
@@ -696,7 +699,8 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
     if mode == "bootstrap":
         bootstrap_completed = bool(back.get("coverage_complete"))
 
-    with sqlite3.connect(cfg.db_path) as conn:
+    conn = sqlite3.connect(cfg.db_path)
+    try:
         write_collection_sync_state(
             conn,
             mode="maintenance" if bootstrap_completed else "bootstrap",
@@ -709,6 +713,8 @@ def ingest_content_engagement(cfg: BuzzIngestConfig) -> Dict[str, Any]:
             stop_reason=back.get("stop_reason"),
             pages_fetched_last_run=int(back.get("pages_fetched", 0)),
         )
+    finally:
+        conn.close()
 
     return {
         "ok": True,

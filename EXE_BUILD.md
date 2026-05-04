@@ -22,20 +22,28 @@ dist\CivitAITracker\CivitAITracker.exe
 4. Run now.
 5. Open dashboard.
 6. Confirm the Collections section appears when collection data exists.
-7. Confirm the dashboard header `generated ...` timestamp changes after a new run.
-8. Check `logs\core_last.log` and confirm `collection_ingest.ok` is true when an API key is configured.
+7. Confirm the Post performance table appears in the Analytics workspace.
+8. Confirm the Performance and Collections period filters work: day, week, month, year, all time.
+9. Confirm post thumbnails load, or fall back to `Open image` when only an image ID is known.
+10. Confirm `Open image` collection fallbacks stay aligned inside the preview column.
+11. Confirm the Visual overview charts appear above the posting recommendations.
+12. Confirm clicking a post performance row opens the post detail drawer.
+13. Confirm collection image rows link to `/images/{image_id}` when no local post mapping exists.
+14. Confirm the dashboard header `generated ...` timestamp changes after a new run.
+15. Check `logs\core_last.log` and confirm `collection_ingest.ok` is true when an API key is configured.
 
-## v10 modules
+## v10 / v10.1 modules
 
-The v10 collection tracking layer uses:
+The v10 collection tracking and v10.1 dashboard monitoring layers use:
 
 - `buzz_ingest.py`
 - `collection_runtime.py`
 - `collection_sync_state.py`
 - `engagement_correlation.py`
 - `engagement_dashboard.py`
+- `tracker_service.py`
 
-They are imported by `tracker_service.py` and should be picked up by PyInstaller. The spec also lists them explicitly as hidden imports for safety.
+The collection modules are imported by `tracker_service.py` and should be picked up by PyInstaller. The spec also lists them explicitly as hidden imports for safety.
 
 ## Do not ship personal runtime files
 

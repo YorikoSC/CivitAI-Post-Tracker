@@ -22,6 +22,7 @@ a = Analysis(
         ('config.example.json', '.'),
         ('README.md', '.'),
         ('DASHBOARD_GUIDE.md', '.'),
+        ('UPDATE_GUIDE.md', '.'),
     ],
     hiddenimports=hiddenimports,
     hookspath=[],

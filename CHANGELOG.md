@@ -1,5 +1,35 @@
 # Changelog
 
+## v10.1
+
+### Added
+- Added a Post performance table with current totals, recent gains, early-window reaction snapshots, collection activity, image count, and last seen data.
+- Added lazy thumbnail previews to post performance rows.
+- Added a post detail drawer with larger preview, compact metrics, post link, primary image link, and stored image links.
+- Added a Visual overview section with daily activity, reaction mix, and top movement charts.
+- Added a tabbed Analytics workspace for performance, collections, timing, and history tables.
+- Added workspace search plus active-row and image-only row filters.
+- Added quick period filters for Performance and Collections tables: day, week, month, year, and all time.
+- Added preview columns for collection image tables when local preview URLs are available.
+- Added image URL storage in `post_images` via `image_url` and `thumbnail_url`.
+- Added `CODEX_CONTEXT.md` as a cross-machine Codex handoff note.
+- Added smoke tests for post performance metrics, image-only collection links, and CivitAI imagecache preview URL handling.
+
+### Changed
+- Replaced the lower stack of collapsible dashboard tables with the Analytics workspace.
+- Collection image-only rows now link directly to CivitAI image pages and show `Post mapping not found locally` instead of `Unlinked image`.
+- Missing post preview URLs now fall back to an `Open image` link when an image ID is known.
+- Collection `Open image` fallbacks now use the same thumbnail-sized preview slot as image previews.
+- Hidden preview fallback blocks are now forced hidden until an image load error occurs.
+- Image metadata enrichment now builds CivitAI imagecache URLs from `image.getInfinite` UUID tokens and avoids nested profile/avatar URLs.
+- Dashboard browser sorting now honors explicit numeric/date sort values.
+- Visible app/dashboard labels and tracker user agents now report v10.1.
+
+### Notes
+- Existing local image rows without stored image IDs may still show `No preview` until a normal tracker run refreshes image metadata from CivitAI.
+- The v10.1 release scope is dashboard monitoring polish. Broader application UI redesign remains a good candidate for v10.2.
+- Portable update and rollback guidance is documented in `UPDATE_GUIDE.md`.
+
 ## v10.0.1
 
 ### Added

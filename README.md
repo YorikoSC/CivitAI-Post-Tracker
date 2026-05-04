@@ -1,15 +1,19 @@
-# CivitAI Tracker v10.0.1
+# CivitAI Tracker v10.1
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
 v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
 
-The v10.0.1 hotfix stabilizes collection history handling: bootstrap vs maintenance sync modes, coverage-aware collection totals, safer dashboard refreshes, and compatibility with older config files.
+v10.1 turns the dashboard into a monitoring workspace: post performance rows, lazy image previews, a post detail drawer, and filtered analytics tabs for performance, collections, timing, and history.
 
 ## Features
 
 - Local post analytics for CivitAI posts
 - Reaction tracking by post
+- Post performance table with current totals, recent gains, early-window snapshots, and collection activity
+- Lazy-loaded thumbnail previews and a post detail drawer in the dashboard
+- Visual dashboard overview with daily activity, reaction mix, and top movement charts
+- Tabbed dashboard workspace with table search, period filters, and quick filters
 - Suggested posting windows based on historical performance
 - HTML dashboard with runtime status
 - Auto polling with tray support
@@ -93,6 +97,12 @@ CivitAITracker.exe
 ```
 
 On first launch, open **Settings**, save your configuration, then use **Diagnostics** to confirm the environment is healthy.
+
+## Updating
+
+The app is currently updated as a portable folder replacement. Before updating, close the app and back up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
+
+See `UPDATE_GUIDE.md` for the full update and rollback checklist.
 
 ## Recommended autonomous mode
 

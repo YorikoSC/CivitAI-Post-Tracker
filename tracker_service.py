@@ -3,6 +3,7 @@ import csv
 import html
 import json
 import os
+import re
 import sqlite3
 import sys
 import time
@@ -16,7 +17,7 @@ import requests
 
 from buzz_ingest import run_b2_1_ingest
 from engagement_correlation import run_b2_2_correlation
-from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section
+from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section, render_collection_tables_html
 
 from config_utils import load_yaml_config, deep_get, choose, read_api_key
 
@@ -26,12 +27,15 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
 
 DEFAULT_TIMEOUT = 30
+APP_VERSION = "10.1"
+APP_TITLE = f"CivitAI Tracker v{APP_VERSION}"
 DEFAULT_VIEW_HOST = "https://civitai.red"
 DEFAULT_API_MODE = "red"
 DEFAULT_NSFW_LEVEL = "X"
 DEFAULT_POLL_MINUTES = 15
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAT_KEYS = ["likeCount", "heartCount", "laughCount", "cryCount", "commentCount"]
+CIVITAI_IMAGE_CACHE_ROOT = "https://imagecache.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
 
 
 def utc_now() -> datetime:
@@ -191,6 +195,8 @@ def init_db(conn: sqlite3.Connection) -> None:
             image_created_at TEXT,
             nsfw TEXT,
             nsfw_level TEXT,
+            image_url TEXT,
+            thumbnail_url TEXT,
             source_host TEXT,
             captured_at TEXT NOT NULL,
             UNIQUE(post_id, image_id)
@@ -205,13 +211,15 @@ def init_db(conn: sqlite3.Connection) -> None:
     ensure_column(conn, "post_snapshots", "source_kind", "TEXT")
     ensure_column(conn, "post_snapshots", "title", "TEXT")
     ensure_column(conn, "post_deltas", "title", "TEXT")
+    ensure_column(conn, "post_images", "image_url", "TEXT")
+    ensure_column(conn, "post_images", "thumbnail_url", "TEXT")
 
     conn.commit()
 
 
 def build_headers(api_key: Optional[str]) -> Dict[str, str]:
     headers = {
-        "User-Agent": "civitai-post-tracker-v10.0.1-core/1.0",
+        "User-Agent": f"civitai-post-tracker-v{APP_VERSION}-core/1.0",
         "Accept": "application/json",
     }
     if api_key:
@@ -420,6 +428,124 @@ def safe_int(value: Any) -> Optional[int]:
         return None
 
 
+def safe_url(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if value.startswith(("https://", "http://")):
+        return value
+    return None
+
+
+def first_url(*values: Any) -> Optional[str]:
+    for value in values:
+        url = safe_url(value)
+        if url:
+            return url
+    return None
+
+
+def uuid_token(value: Any) -> Optional[str]:
+    if not isinstance(value, str):
+        return None
+    value = value.strip()
+    if re.fullmatch(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}", value):
+        return value
+    return None
+
+
+def civitai_cache_url(image_uuid: str, image_id: int, width: int) -> str:
+    return f"{CIVITAI_IMAGE_CACHE_ROOT}/{image_uuid}/width={int(width)}/{int(image_id)}.jpeg"
+
+
+def url_candidates(value: Any, path: str = "") -> List[Tuple[str, str]]:
+    if isinstance(value, dict):
+        found: List[Tuple[str, str]] = []
+        for key, nested_value in value.items():
+            next_path = f"{path}.{key}" if path else str(key)
+            found.extend(url_candidates(nested_value, next_path))
+        return found
+    if isinstance(value, list):
+        found = []
+        for idx, nested_value in enumerate(value):
+            found.extend(url_candidates(nested_value, f"{path}[{idx}]"))
+        return found
+    url = safe_url(value)
+    return [(path, url)] if url else []
+
+
+def best_image_url(candidates: List[Tuple[str, str]], prefer_thumbnail: bool = False) -> Optional[str]:
+    media_candidates = [
+        candidate
+        for candidate in candidates
+        if any(token in candidate[1].lower() for token in ("imagecache.civitai", "image.civitai", "/file/civitai"))
+    ]
+    if not media_candidates:
+        return None
+
+    def score(candidate: Tuple[str, str]) -> Tuple[int, int]:
+        path, url = candidate
+        haystack = f"{path} {url}".lower()
+        value = 0
+        if "image.civitai" in haystack:
+            value += 50
+        if any(ext in haystack for ext in (".jpg", ".jpeg", ".png", ".webp", ".gif")):
+            value += 30
+        if any(token in haystack for token in ("image", "url", "src")):
+            value += 5
+        if prefer_thumbnail:
+            if any(token in haystack for token in ("thumb", "thumbnail", "preview", "small", "medium", "width=")):
+                value += 40
+            if any(token in haystack for token in ("original", "full", "download")):
+                value -= 10
+        else:
+            if any(token in haystack for token in ("original", "full", "download", "large")):
+                value += 20
+        return value, -len(url)
+
+    return sorted(media_candidates, key=score, reverse=True)[0][1]
+
+
+def extract_image_urls(item: dict) -> Tuple[Optional[str], Optional[str]]:
+    urls = item.get("urls") if isinstance(item.get("urls"), dict) else {}
+    meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
+    image = item.get("image") if isinstance(item.get("image"), dict) else {}
+    candidates = url_candidates(item)
+    image_id = safe_int(item.get("id"))
+    image_uuid = uuid_token(item.get("url"))
+    cached_full_url = civitai_cache_url(image_uuid, image_id, 1024) if image_uuid and image_id is not None else None
+    cached_thumbnail_url = civitai_cache_url(image_uuid, image_id, 450) if image_uuid and image_id is not None else None
+
+    image_url = first_url(
+        item.get("url"),
+        item.get("imageUrl"),
+        item.get("downloadUrl"),
+        urls.get("original"),
+        urls.get("full"),
+        urls.get("large"),
+        image.get("url"),
+        meta.get("url"),
+        cached_full_url,
+    ) or best_image_url(candidates, prefer_thumbnail=False)
+    thumbnail_url = first_url(
+        item.get("thumbnailUrl"),
+        item.get("thumbUrl"),
+        item.get("previewUrl"),
+        item.get("smallUrl"),
+        urls.get("thumbnail"),
+        urls.get("thumb"),
+        urls.get("small"),
+        urls.get("preview"),
+        urls.get("medium"),
+        image.get("thumbnailUrl"),
+        image.get("url"),
+        meta.get("thumbnailUrl"),
+        cached_thumbnail_url,
+        image_url,
+    ) or best_image_url(candidates, prefer_thumbnail=True) or image_url
+    return image_url, thumbnail_url
+
+
 def normalize_post(item: dict, username: str) -> Optional[dict]:
     post_id = safe_int(item.get("id") or item.get("postId"))
     if post_id is None:
@@ -471,12 +597,15 @@ def normalize_image(item: dict) -> Optional[dict]:
     post_id = safe_int(item.get("postId") or item.get("post_id"))
     if image_id is None or post_id is None:
         return None
+    image_url, thumbnail_url = extract_image_urls(item)
     return {
         "image_id": image_id,
         "post_id": post_id,
         "image_created_at": item.get("createdAt"),
         "nsfw": item.get("nsfw"),
         "nsfw_level": item.get("nsfwLevel"),
+        "image_url": image_url,
+        "thumbnail_url": thumbnail_url,
         "source_host": item.get("_source_host"),
     }
 
@@ -670,8 +799,9 @@ def replace_post_images(conn: sqlite3.Connection, images: List[dict], allowed_po
             cur.execute(
                 """
                 INSERT OR REPLACE INTO post_images (
-                    post_id, image_id, position, image_created_at, nsfw, nsfw_level, source_host, captured_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    post_id, image_id, position, image_created_at, nsfw, nsfw_level,
+                    image_url, thumbnail_url, source_host, captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     post_id,
@@ -680,6 +810,8 @@ def replace_post_images(conn: sqlite3.Connection, images: List[dict], allowed_po
                     row.get("image_created_at"),
                     row.get("nsfw"),
                     row.get("nsfw_level"),
+                    row.get("image_url"),
+                    row.get("thumbnail_url"),
                     row.get("source_host"),
                     captured_at,
                 ),
@@ -731,6 +863,30 @@ def get_post_images_map(conn: sqlite3.Connection) -> Dict[int, List[int]]:
     result: Dict[int, List[int]] = defaultdict(list)
     for row in cur.fetchall():
         result[int(row[0])].append(int(row[1]))
+    return result
+
+
+def get_post_image_details_map(conn: sqlite3.Connection) -> Dict[int, List[Dict[str, Any]]]:
+    cur = conn.cursor()
+    cur.execute(
+        """
+        SELECT post_id, image_id, position, image_url, thumbnail_url
+        FROM post_images
+        ORDER BY post_id ASC, position ASC, image_id ASC
+        """
+    )
+    result: Dict[int, List[Dict[str, Any]]] = defaultdict(list)
+    for row in cur.fetchall():
+        image_url = row["image_url"] if "image_url" in row.keys() else None
+        thumbnail_url = row["thumbnail_url"] if "thumbnail_url" in row.keys() else None
+        result[int(row["post_id"])].append(
+            {
+                "image_id": int(row["image_id"]),
+                "position": safe_int(row["position"]),
+                "image_url": image_url,
+                "thumbnail_url": thumbnail_url,
+            }
+        )
     return result
 
 
@@ -1025,6 +1181,163 @@ def summarize_collection_periods(
     }
 
 
+def reaction_delta_value(row: sqlite3.Row) -> int:
+    total = safe_int(row["reaction_total_delta"])
+    if total is not None:
+        return total
+    return sum(safe_int(row[key]) or 0 for key in ("like_delta", "heart_delta", "laugh_delta", "cry_delta"))
+
+
+def build_post_performance_rows(
+    conn: sqlite3.Connection,
+    current_posts: List[sqlite3.Row],
+    snapshots_by_post: Dict[int, List[sqlite3.Row]],
+    deltas: List[sqlite3.Row],
+    tz_helper: TimezoneHelper,
+) -> List[Dict[str, Any]]:
+    now_local = utc_now().astimezone(tz_helper.tz)
+    today_date = now_local.date()
+    week_cutoff = now_local - timedelta(days=7)
+    month_cutoff = now_local - timedelta(days=30)
+    year_cutoff = now_local - timedelta(days=365)
+
+    reaction_today: Dict[int, int] = defaultdict(int)
+    reaction_week: Dict[int, int] = defaultdict(int)
+    reaction_month: Dict[int, int] = defaultdict(int)
+    reaction_year: Dict[int, int] = defaultdict(int)
+    comments_today: Dict[int, int] = defaultdict(int)
+    comments_week: Dict[int, int] = defaultdict(int)
+    comments_month: Dict[int, int] = defaultdict(int)
+    comments_year: Dict[int, int] = defaultdict(int)
+
+    for row in deltas:
+        detected_dt = tz_helper.parse_iso(row["detected_at"])
+        if detected_dt is None:
+            continue
+        local_dt = detected_dt.astimezone(tz_helper.tz)
+        post_id = int(row["post_id"])
+        reaction_delta = reaction_delta_value(row)
+        comment_delta = safe_int(row["comment_delta"]) or 0
+
+        if local_dt.date() == today_date:
+            reaction_today[post_id] += reaction_delta
+            comments_today[post_id] += comment_delta
+
+        if local_dt >= week_cutoff:
+            reaction_week[post_id] += reaction_delta
+            comments_week[post_id] += comment_delta
+
+        if local_dt >= month_cutoff:
+            reaction_month[post_id] += reaction_delta
+            comments_month[post_id] += comment_delta
+
+        if local_dt >= year_cutoff:
+            reaction_year[post_id] += reaction_delta
+            comments_year[post_id] += comment_delta
+
+    collections_today: Dict[int, int] = defaultdict(int)
+    collections_week: Dict[int, int] = defaultdict(int)
+    collections_month: Dict[int, int] = defaultdict(int)
+    collections_year: Dict[int, int] = defaultdict(int)
+    try:
+        collection_rows = conn.execute(
+            """
+            SELECT event_time, related_post_id
+            FROM content_engagement_events
+            WHERE normalized_type = 'collection_like'
+              AND related_post_id IS NOT NULL
+            """
+        ).fetchall()
+    except sqlite3.OperationalError:
+        collection_rows = []
+
+    for row in collection_rows:
+        event_dt = tz_helper.parse_iso(row["event_time"])
+        if event_dt is None:
+            continue
+        local_dt = event_dt.astimezone(tz_helper.tz)
+        post_id = int(row["related_post_id"])
+
+        if local_dt.date() == today_date:
+            collections_today[post_id] += 1
+
+        if local_dt >= week_cutoff:
+            collections_week[post_id] += 1
+
+        if local_dt >= month_cutoff:
+            collections_month[post_id] += 1
+
+        if local_dt >= year_cutoff:
+            collections_year[post_id] += 1
+
+    image_details_map = get_post_image_details_map(conn)
+    rows: List[Dict[str, Any]] = []
+    for row in current_posts:
+        post_id = int(row["post_id"])
+        images = image_details_map.get(post_id, [])
+        primary_image = images[0] if images else {}
+        reaction_total = safe_int(row["reaction_total"])
+        comment_count = safe_int(row["comment_count"])
+        published_dt = tz_helper.parse_iso(row["published_at"])
+        published_sort = published_dt.timestamp() if published_dt is not None else 0.0
+        reactions_per_day: Optional[float] = None
+        if reaction_total is not None and published_dt is not None:
+            age_days = (now_local - published_dt.astimezone(tz_helper.tz)).total_seconds() / 86400
+            if age_days > 0:
+                reactions_per_day = reaction_total / max(age_days, 1 / 24)
+
+        first2_reactions = None
+        first24_reactions = None
+        if reaction_total is not None:
+            first2_reactions = estimate_window_metric(snapshots_by_post, tz_helper, post_id, row["published_at"], "reaction_total", 2)
+            first24_reactions = estimate_window_metric(snapshots_by_post, tz_helper, post_id, row["published_at"], "reaction_total", 24)
+
+        rows.append(
+            {
+                "post_id": post_id,
+                "title": row["title"],
+                "published_at": row["published_at"],
+                "captured_at": row["captured_at"],
+                "reaction_total": reaction_total,
+                "comment_count": comment_count,
+                "reactions_per_day": reactions_per_day,
+                "reaction_today": int(reaction_today.get(post_id, 0)),
+                "reaction_week": int(reaction_week.get(post_id, 0)),
+                "reaction_month": int(reaction_month.get(post_id, 0)),
+                "reaction_year": int(reaction_year.get(post_id, 0)),
+                "comments_today": int(comments_today.get(post_id, 0)),
+                "comments_week": int(comments_week.get(post_id, 0)),
+                "comments_month": int(comments_month.get(post_id, 0)),
+                "comments_year": int(comments_year.get(post_id, 0)),
+                "first2_reactions": first2_reactions,
+                "first24_reactions": first24_reactions,
+                "collections_today": int(collections_today.get(post_id, 0)),
+                "collections_week": int(collections_week.get(post_id, 0)),
+                "collections_month": int(collections_month.get(post_id, 0)),
+                "collections_year": int(collections_year.get(post_id, 0)),
+                "image_count": len(images),
+                "images": images,
+                "primary_image_id": primary_image.get("image_id"),
+                "primary_image_url": primary_image.get("image_url"),
+                "primary_thumbnail_url": primary_image.get("thumbnail_url"),
+                "published_sort": published_sort,
+            }
+        )
+
+    rows.sort(
+        key=lambda item: (
+            int(item.get("reaction_week") or 0),
+            int(item.get("collections_week") or 0),
+            int(item.get("reaction_today") or 0),
+            int(item.get("reaction_total") if item.get("reaction_total") is not None else -1),
+            float(item.get("published_sort") or 0),
+            int(item.get("post_id") or 0),
+        ),
+        reverse=True,
+    )
+    return rows
+
+
 def recommendation_score(row: Dict[str, Any]) -> Optional[Tuple[float, str, str]]:
     if row.get("avg_24h_reactions") is not None:
         return float(row["avg_24h_reactions"]), "Avg 24h reactions", "first-day performance"
@@ -1108,7 +1421,8 @@ def export_csvs(conn: sqlite3.Connection, csv_dir: str, tz_helper: TimezoneHelpe
     export_query_to_csv(
         conn,
         """
-        SELECT post_id, image_id, position, image_created_at, nsfw, nsfw_level, source_host, captured_at
+        SELECT post_id, image_id, position, image_created_at, nsfw, nsfw_level,
+               image_url, thumbnail_url, source_host, captured_at
         FROM post_images
         ORDER BY post_id DESC, position ASC, image_id ASC
         """,
@@ -1207,7 +1521,12 @@ def render_dashboard(
     unknown_totals = tracked_posts - known_totals
     latest_capture = current_posts[0]["captured_at"] if current_posts else None
     runtime_status = load_runtime_status(runtime_status_path)
-    collections_html = render_collection_dashboard_section(db_path, view_host=view_host, time_formatter=tz_helper.fmt_dt) if db_path else ""
+    collections_html = (
+        render_collection_dashboard_section(db_path, view_host=view_host, time_formatter=tz_helper.fmt_dt, include_tables=False)
+        if db_path
+        else ""
+    )
+    collection_tables_html = render_collection_tables_html(db_path, view_host=view_host, time_formatter=tz_helper.fmt_dt) if db_path else ""
 
     known_rows = [r for r in current_posts if r["stats_known"]]
     by_total_reactions = sorted(known_rows, key=lambda r: (int(r["reaction_total"] or 0), int(r["heart_count"] or 0), int(r["post_id"])), reverse=True)[:15]
@@ -1224,6 +1543,7 @@ def render_dashboard(
 
     first24_rows.sort(key=lambda pair: (pair[1], int(pair[0]["post_id"])), reverse=True)
     first2_rows.sort(key=lambda pair: (pair[1], int(pair[0]["post_id"])), reverse=True)
+    post_performance_rows = build_post_performance_rows(conn, current_posts, snapshots_by_post, deltas, tz_helper)
 
     if min_post_id is not None:
         tracking_window = f"From post id ≥ {min_post_id}"
@@ -1399,21 +1719,182 @@ def render_dashboard(
             "</div>"
         )
         parts_rec.append("</div>")
-        parts_rec.append(
-            "<div class='panel table-panel' style='margin-top:18px'>"
-            "<h2>Suggested posting windows</h2>"
-            "<div class='hint'>Ranked timing candidates from posts already tracked in this database. Treat low-confidence rows as directional hints, not rules.</div>"
-            f"{render_recommendation_table('hour recommendations', hour_rows, 'Hour')}"
-            "</div>"
-        )
-        parts_rec.append(
-            "<div class='panel table-panel' style='margin-top:18px'>"
-            "<h2>Suggested weekdays</h2>"
-            "<div class='hint'>Weekday candidates use the same scoring basis as the hour recommendations.</div>"
-            f"{render_recommendation_table('weekday recommendations', weekday_rows, 'Weekday')}"
-            "</div>"
-        )
         return "".join(parts_rec)
+
+    def short_text(value: Any, limit: int = 42) -> str:
+        text = str(value or "Untitled post").strip() or "Untitled post"
+        return text if len(text) <= limit else text[: max(0, limit - 1)].rstrip() + "..."
+
+    def build_daily_activity(days: int = 14) -> List[Dict[str, int | str]]:
+        today_local = utc_now().astimezone(tz_helper.tz).date()
+        dates = [today_local - timedelta(days=days - 1 - idx) for idx in range(days)]
+        by_date: Dict[Any, Dict[str, int]] = {date: {"reactions": 0, "collections": 0} for date in dates}
+
+        for row in deltas:
+            detected_dt = tz_helper.parse_iso(row["detected_at"])
+            if detected_dt is None:
+                continue
+            local_date = detected_dt.astimezone(tz_helper.tz).date()
+            if local_date in by_date:
+                by_date[local_date]["reactions"] += max(0, reaction_delta_value(row))
+
+        try:
+            collection_rows = conn.execute(
+                """
+                SELECT event_time
+                FROM content_engagement_events
+                WHERE normalized_type = 'collection_like'
+                """
+            ).fetchall()
+        except sqlite3.OperationalError:
+            collection_rows = []
+
+        for row in collection_rows:
+            event_dt = tz_helper.parse_iso(row["event_time"])
+            if event_dt is None:
+                continue
+            local_date = event_dt.astimezone(tz_helper.tz).date()
+            if local_date in by_date:
+                by_date[local_date]["collections"] += 1
+
+        return [
+            {
+                "date": str(date),
+                "label": date.strftime("%m-%d"),
+                "reactions": by_date[date]["reactions"],
+                "collections": by_date[date]["collections"],
+            }
+            for date in dates
+        ]
+
+    def render_daily_activity_chart(rows: List[Dict[str, int | str]]) -> str:
+        width = 720
+        height = 230
+        plot_left = 36
+        plot_top = 18
+        plot_width = 660
+        plot_height = 150
+        base_y = plot_top + plot_height
+        max_value = max([1] + [int(row["reactions"]) for row in rows] + [int(row["collections"]) for row in rows])
+        step = plot_width / max(1, len(rows))
+        bar_width = max(8.0, min(18.0, step * 0.28))
+
+        grid = []
+        for idx in range(4):
+            y = base_y - (plot_height * idx / 3)
+            value = round(max_value * idx / 3)
+            grid.append(
+                f"<line x1='{plot_left}' y1='{y:.1f}' x2='{plot_left + plot_width}' y2='{y:.1f}' class='chart-grid'></line>"
+                f"<text x='8' y='{y + 4:.1f}' class='chart-axis'>{value}</text>"
+            )
+
+        bars = []
+        labels = []
+        for idx, row in enumerate(rows):
+            center_x = plot_left + (idx * step) + (step / 2)
+            reactions = int(row["reactions"])
+            collections = int(row["collections"])
+            reaction_height = (reactions / max_value) * plot_height
+            collection_height = (collections / max_value) * plot_height
+            bars.append(
+                f"<rect x='{center_x - bar_width - 2:.1f}' y='{base_y - reaction_height:.1f}' width='{bar_width:.1f}' height='{reaction_height:.1f}' rx='3' class='chart-bar reaction'><title>{html.escape(str(row['date']))}: {reactions} reactions</title></rect>"
+                f"<rect x='{center_x + 2:.1f}' y='{base_y - collection_height:.1f}' width='{bar_width:.1f}' height='{collection_height:.1f}' rx='3' class='chart-bar collection'><title>{html.escape(str(row['date']))}: {collections} collection adds</title></rect>"
+            )
+            if idx % 2 == 0 or idx == len(rows) - 1:
+                labels.append(f"<text x='{center_x:.1f}' y='{height - 18}' text-anchor='middle' class='chart-axis'>{html.escape(str(row['label']))}</text>")
+
+        return (
+            "<svg class='chart-svg' viewBox='0 0 720 230' role='img' aria-label='Daily reactions and collection adds'>"
+            f"{''.join(grid)}{''.join(bars)}"
+            f"<line x1='{plot_left}' y1='{base_y}' x2='{plot_left + plot_width}' y2='{base_y}' class='chart-axis-line'></line>"
+            f"{''.join(labels)}"
+            "</svg>"
+            "<div class='chart-legend'><span><i class='legend-dot reaction'></i>Reactions</span><span><i class='legend-dot collection'></i>Collections</span></div>"
+        )
+
+    def render_reaction_mix_chart(totals: Dict[str, int]) -> str:
+        items = [
+            ("Likes", int(totals.get("like") or 0), "#7fb3ff"),
+            ("Hearts", int(totals.get("heart") or 0), "#ff7aa2"),
+            ("Laughs", int(totals.get("laugh") or 0), "#f2cc60"),
+            ("Cries", int(totals.get("cry") or 0), "#9baacf"),
+        ]
+        total = sum(value for _, value, _ in items)
+        if total <= 0:
+            return "<div class='chart-empty'>No reaction gains captured today.</div>"
+        rows_html = []
+        for label, value, color in items:
+            pct = (value / total) * 100 if total else 0
+            rows_html.append(
+                "<div class='mix-row'>"
+                f"<div class='mix-label'>{html.escape(label)}</div>"
+                "<div class='mix-track'>"
+                f"<span class='mix-fill' style='width:{pct:.1f}%;background:{color}'></span>"
+                "</div>"
+                f"<div class='mix-value'>{value}</div>"
+                "</div>"
+            )
+        return "".join(rows_html)
+
+    def render_top_movement_chart(rows: List[Dict[str, Any]]) -> str:
+        candidates = []
+        for row in rows:
+            reactions = int(row.get("reaction_week") or 0)
+            collections = int(row.get("collections_week") or 0)
+            score = reactions + collections
+            if score > 0:
+                candidates.append((score, reactions, collections, row))
+
+        label = "7-day movement"
+        if not candidates:
+            for row in rows[:6]:
+                total = safe_int(row.get("reaction_total")) or 0
+                if total > 0:
+                    candidates.append((total, total, 0, row))
+            label = "Lifetime reactions"
+
+        if not candidates:
+            return "<div class='chart-empty'>No post movement to chart yet.</div>"
+
+        candidates = sorted(candidates, key=lambda item: (item[0], item[1], int(item[3].get("post_id") or 0)), reverse=True)[:6]
+        max_score = max(1, max(item[0] for item in candidates))
+        rows_html = []
+        for score, reactions, collections, row in candidates:
+            pct = max(4, (score / max_score) * 100)
+            detail = f"+{reactions} reactions · +{collections} collections" if label == "7-day movement" else f"{score} reactions"
+            rows_html.append(
+                "<div class='top-chart-row'>"
+                f"<div class='top-chart-label'>{post_link(view_host, int(row['post_id']))}<span>{html.escape(short_text(row.get('title'), 36))}</span></div>"
+                "<div class='top-chart-track'>"
+                f"<span class='top-chart-fill' style='width:{pct:.1f}%'></span>"
+                "</div>"
+                f"<div class='top-chart-value'>{html.escape(detail)}</div>"
+                "</div>"
+            )
+        return f"<div class='chart-mode'>{html.escape(label)}</div>{''.join(rows_html)}"
+
+    def render_visual_overview() -> str:
+        daily_rows = build_daily_activity()
+        return (
+            "<div class='section-title'>Visual overview</div>"
+            "<div class='visual-grid'>"
+            "<section class='visual-card visual-wide'>"
+            "<h2>Daily activity</h2>"
+            "<p class='hint'>Reaction gains and collection adds over the last 14 local days.</p>"
+            f"{render_daily_activity_chart(daily_rows)}"
+            "</section>"
+            "<section class='visual-card'>"
+            "<h2>Reaction mix today</h2>"
+            "<p class='hint'>How today's reaction gain is distributed by type.</p>"
+            f"{render_reaction_mix_chart(today)}"
+            "</section>"
+            "<section class='visual-card'>"
+            "<h2>Top 7-day movement</h2>"
+            "<p class='hint'>Posts currently carrying the most visible momentum.</p>"
+            f"{render_top_movement_chart(post_performance_rows)}"
+            "</section>"
+            "</div>"
+        )
 
     def render_leaders_table(rows: List[sqlite3.Row]) -> str:
         if not rows:
@@ -1435,9 +1916,9 @@ def render_dashboard(
             f"<tbody>{''.join(body)}</tbody></table>"
         )
 
-    def render_window_table(title: str, rows: List[Tuple[sqlite3.Row, int]], window_label: str) -> str:
+    def render_window_table_content(rows: List[Tuple[sqlite3.Row, int]], window_label: str) -> str:
         if not rows:
-            return f"<div class='panel'><h2>{html.escape(title)}</h2><div class='feature-note'>Not enough early snapshots yet.</div></div>"
+            return "<div class='feature-note'>Not enough early snapshots yet.</div>"
         body = []
         for idx, (row, score) in enumerate(rows[:15], start=1):
             body.append(
@@ -1450,13 +1931,12 @@ def render_dashboard(
                 "</tr>"
             )
         return (
-            f"<div class='panel table-panel'><h2>{html.escape(title)}</h2>"
             "<table class='clean-table'>"
             "<thead><tr><th>#</th><th>Post</th><th class='num'>Score</th><th>Details</th><th>Published</th></tr></thead>"
-            f"<tbody>{''.join(body)}</tbody></table></div>"
+            f"<tbody>{''.join(body)}</tbody></table>"
         )
 
-    def render_summary_table(title: str, rows: List[List[str]], headers: List[str]) -> str:
+    def render_summary_table_content(rows: List[List[str]], headers: List[str]) -> str:
         body = []
         for row in rows:
             rendered = []
@@ -1469,7 +1949,203 @@ def render_dashboard(
             cls = " class='num'" if i and i < len(headers) - 1 else ""
             head_cells.append(f"<th{cls}>{html.escape(h)}</th>")
         head = "".join(head_cells)
-        return f"<div class='panel table-panel'><h2>{html.escape(title)}</h2><table class='clean-table'><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table></div>"
+        return f"<table class='clean-table'><thead><tr>{head}</tr></thead><tbody>{''.join(body)}</tbody></table>"
+
+    def sortable_cell(content: str, sort_value: Any = None, cls: str = "") -> str:
+        class_attr = f" class='{html.escape(cls, quote=True)}'" if cls else ""
+        sort_attr = "" if sort_value is None else f" data-sort-value='{html.escape(str(sort_value), quote=True)}'"
+        return f"<td{class_attr}{sort_attr}>{content}</td>"
+
+    def fmt_signed(value: int) -> str:
+        return f"+{int(value)}" if int(value) > 0 else str(int(value))
+
+    def render_delta(value: int) -> str:
+        cls = "delta-pos" if int(value) > 0 else ("delta-neg" if int(value) < 0 else "")
+        label = html.escape(fmt_signed(int(value)))
+        return f"<span class='{cls}'>{label}</span>" if cls else label
+
+    def period_attrs(flags: Dict[str, bool]) -> str:
+        attrs = []
+        for key in ("day", "week", "month", "year", "all"):
+            if flags.get(key):
+                attrs.append(f"data-period-{key}='1'")
+        return " " + " ".join(attrs) if attrs else ""
+
+    def image_page_link(image_id: Any, label: Optional[str] = None) -> str:
+        if image_id in (None, ""):
+            return "—"
+        image_id_int = int(image_id)
+        text = label or f"image #{image_id_int}"
+        url = image_page_url(image_id_int)
+        return f'<a href="{html.escape(url, quote=True)}" target="_blank" rel="noopener">{html.escape(text)}</a>'
+
+    def image_page_url(image_id: Any) -> str:
+        return f"{view_host.rstrip('/')}/images/{int(image_id)}"
+
+    def preview_html(src: Any, alt: str, cls: str = "post-thumb", fallback_href: Optional[str] = None) -> str:
+        url = safe_url(src)
+        if not url:
+            missing = f"<div class='{html.escape(cls, quote=True)} thumb-missing'>{'Open image' if fallback_href else 'No preview'}</div>"
+            if fallback_href:
+                return f"<a class='preview-link' href='{html.escape(fallback_href, quote=True)}' target='_blank' rel='noopener'>{missing}</a>"
+            return missing
+        return (
+            f"<img class='{html.escape(cls, quote=True)}' src='{html.escape(url, quote=True)}' "
+            f"alt='{html.escape(alt, quote=True)}' loading='lazy' referrerpolicy='no-referrer'>"
+            f"<div class='{html.escape(cls, quote=True)} thumb-missing' hidden style='display:none'>No preview</div>"
+        )
+
+    def stat_tile(label: str, value: str, detail: str = "") -> str:
+        detail_html = f"<div class='drawer-stat-detail'>{html.escape(detail)}</div>" if detail else ""
+        return (
+            "<div class='drawer-stat'>"
+            f"<div class='drawer-stat-label'>{html.escape(label)}</div>"
+            f"<div class='drawer-stat-value'>{value}</div>"
+            f"{detail_html}"
+            "</div>"
+        )
+
+    def render_post_detail_template(row: Dict[str, Any]) -> str:
+        post_id = int(row["post_id"])
+        title = str(row.get("title") or "Untitled post")
+        images = row.get("images") or []
+        primary_src = row.get("primary_thumbnail_url") or row.get("primary_image_url")
+        primary_image_id = row.get("primary_image_id")
+        primary_href = image_page_url(primary_image_id) if primary_image_id else None
+        image_links = []
+        for image in images[:8]:
+            image_links.append(image_page_link(image.get("image_id")))
+        if len(images) > 8:
+            image_links.append(f"<span class='drawer-muted'>+{len(images) - 8} more</span>")
+        if not image_links:
+            image_links.append("<span class='drawer-muted'>No image IDs stored yet</span>")
+
+        today_comments = int(row.get("comments_today") or 0)
+        week_comments = int(row.get("comments_week") or 0)
+        collections_today = int(row.get("collections_today") or 0)
+        collections_week = int(row.get("collections_week") or 0)
+        image_count = int(row.get("image_count") or 0)
+        reaction_total = row.get("reaction_total")
+        comment_count = row.get("comment_count")
+
+        stats = "".join(
+            [
+                stat_tile("Current", fmt_int(reaction_total), f"{fmt_int(comment_count)} comments"),
+                stat_tile("Avg/day", fmt_num(row.get("reactions_per_day"))),
+                stat_tile("Today", render_delta(int(row.get("reaction_today") or 0)), f"comments {fmt_signed(today_comments)}"),
+                stat_tile("7 days", render_delta(int(row.get("reaction_week") or 0)), f"comments {fmt_signed(week_comments)}"),
+                stat_tile("Collections", str(collections_week), f"today {collections_today}"),
+                stat_tile("First 2h", fmt_int(row.get("first2_reactions"))),
+                stat_tile("First 24h", fmt_int(row.get("first24_reactions"))),
+                stat_tile("Images", str(image_count)),
+            ]
+        )
+
+        return (
+            f"<template data-post-detail-template='{post_id}'>"
+            "<div class='drawer-hero'>"
+            f"{preview_html(primary_src, title, 'drawer-preview', primary_href)}"
+            "<div>"
+            f"<h2 id='post-drawer-title'>{html.escape(title)}</h2>"
+            f"<div class='drawer-links'>{post_link(view_host, post_id)}"
+            f"{' · ' + image_page_link(primary_image_id, 'primary image') if primary_image_id else ''}</div>"
+            f"<div class='drawer-muted'>Published {html.escape(tz_helper.fmt_dt(row.get('published_at')))} · Last seen {html.escape(tz_helper.fmt_dt(row.get('captured_at')))}</div>"
+            "</div>"
+            "</div>"
+            f"<div class='drawer-stats'>{stats}</div>"
+            "<div class='drawer-section'>"
+            "<h3>Images</h3>"
+            f"<div class='drawer-image-links'>{' '.join(image_links)}</div>"
+            "</div>"
+            "</template>"
+        )
+
+    def render_post_detail_drawer(rows: List[Dict[str, Any]]) -> str:
+        templates = "".join(render_post_detail_template(row) for row in rows)
+        return (
+            "<div class='post-drawer-backdrop' data-post-drawer hidden>"
+            "<aside class='post-drawer' role='dialog' aria-modal='true' aria-labelledby='post-drawer-title'>"
+            "<button type='button' class='drawer-close' data-post-drawer-close aria-label='Close'>&times;</button>"
+            "<div class='drawer-content' data-post-drawer-content>"
+            "<h2 id='post-drawer-title'>Post details</h2>"
+            "</div>"
+            "</aside>"
+            "</div>"
+            f"<div hidden>{templates}</div>"
+        )
+
+    def render_post_performance_table(rows: List[Dict[str, Any]]) -> str:
+        if not rows:
+            return "<div class='feature-note'>No tracked posts yet.</div>"
+        body = []
+        for row in rows:
+            reaction_total = row.get("reaction_total")
+            comment_count = row.get("comment_count")
+            reactions_per_day = row.get("reactions_per_day")
+            first2 = row.get("first2_reactions")
+            first24 = row.get("first24_reactions")
+            today_reactions = int(row.get("reaction_today") or 0)
+            week_reactions = int(row.get("reaction_week") or 0)
+            today_comments = int(row.get("comments_today") or 0)
+            week_comments = int(row.get("comments_week") or 0)
+            month_reactions = int(row.get("reaction_month") or 0)
+            year_reactions = int(row.get("reaction_year") or 0)
+            month_comments = int(row.get("comments_month") or 0)
+            year_comments = int(row.get("comments_year") or 0)
+            collections_today = int(row.get("collections_today") or 0)
+            collections_week = int(row.get("collections_week") or 0)
+            collections_month = int(row.get("collections_month") or 0)
+            collections_year = int(row.get("collections_year") or 0)
+            image_count = int(row.get("image_count") or 0)
+
+            current_detail = f"{fmt_int(comment_count)} comments"
+            current_html = f"{fmt_int(reaction_total)}<div class='row-sub'>{html.escape(current_detail)}</div>"
+            today_html = f"{render_delta(today_reactions)}<div class='row-sub'>comments {html.escape(fmt_signed(today_comments))}</div>"
+            week_html = f"{render_delta(week_reactions)}<div class='row-sub'>comments {html.escape(fmt_signed(week_comments))}</div>"
+            collections_html = f"{collections_week}<div class='row-sub'>today {collections_today}</div>"
+            period_flags = {
+                "day": bool(today_reactions or today_comments or collections_today),
+                "week": bool(week_reactions or week_comments or collections_week),
+                "month": bool(month_reactions or month_comments or collections_month),
+                "year": bool(year_reactions or year_comments or collections_year),
+                "all": True,
+            }
+            active_attr = " data-active-row='1'" if any(period_flags[key] for key in ("day", "week", "month", "year")) else ""
+            row_period_attrs = period_attrs(period_flags)
+            detail_attr = f" data-post-detail-id='{int(row['post_id'])}'"
+            artwork_html = (
+                "<div class='artwork-cell'>"
+                f"{preview_html(row.get('primary_thumbnail_url') or row.get('primary_image_url'), str(row.get('title') or 'Post preview'), fallback_href=image_page_url(row.get('primary_image_id')) if row.get('primary_image_id') else None)}"
+                "<div>"
+                f"{post_link(view_host, int(row['post_id']))}"
+                f"<div class='row-sub'>{html.escape(row.get('title') or 'Untitled post')}</div>"
+                "</div>"
+                "</div>"
+            )
+
+            body.append(
+                f"<tr{active_attr}{row_period_attrs}{detail_attr}>"
+                + sortable_cell(
+                    artwork_html,
+                    row.get("post_id"),
+                )
+                + sortable_cell(html.escape(tz_helper.fmt_dt(row.get("published_at"))), row.get("published_sort"))
+                + sortable_cell(current_html, reaction_total if reaction_total is not None else -1, "num")
+                + sortable_cell(fmt_num(reactions_per_day), reactions_per_day if reactions_per_day is not None else -1, "num")
+                + sortable_cell(today_html, today_reactions, "num")
+                + sortable_cell(week_html, week_reactions, "num")
+                + sortable_cell(fmt_int(first2), first2 if first2 is not None else -1, "num")
+                + sortable_cell(fmt_int(first24), first24 if first24 is not None else -1, "num")
+                + sortable_cell(collections_html, collections_week, "num")
+                + sortable_cell(str(image_count), image_count, "num")
+                + sortable_cell(html.escape(tz_helper.fmt_dt(row.get("captured_at"))), row.get("captured_at"))
+                + "</tr>"
+            )
+        return (
+            "<table class='clean-table'>"
+            "<thead><tr><th>Artwork</th><th>Published</th><th class='num'>Current</th><th class='num'>Avg/day</th><th class='num'>+ Today</th><th class='num'>+ 7d</th><th class='num'>First 2h</th><th class='num'>First 24h</th><th class='num'>Collections</th><th class='num'>Images</th><th>Last seen</th></tr></thead>"
+            f"<tbody>{''.join(body)}</tbody></table>"
+        )
 
     def render_recent_posts(rows: List[sqlite3.Row]) -> str:
         if not rows:
@@ -1495,6 +2171,64 @@ def render_dashboard(
             f"<tbody>{''.join(body)}</tbody></table>"
         )
 
+    def render_workspace_block(title: str, hint: str, inner_html: str) -> str:
+        hint_html = f"<div class='hint'>{html.escape(hint)}</div>" if hint else ""
+        return (
+            "<section class='workspace-block'>"
+            f"<h3>{html.escape(title)}</h3>"
+            f"{hint_html}{inner_html}"
+            "</section>"
+        )
+
+    def render_workspace_section(section_id: str, title: str, inner_html: str, active: bool = False) -> str:
+        hidden_attr = "" if active else " hidden"
+        return (
+            f"<section class='workspace-section' data-workspace-section='{html.escape(section_id, quote=True)}'{hidden_attr}>"
+            f"{inner_html}"
+            "<div class='workspace-empty'>No rows match the current filters.</div>"
+            "</section>"
+        )
+
+    def render_analytics_workspace(sections: List[Dict[str, Any]]) -> str:
+        if not sections:
+            return ""
+        tabs = []
+        panels = []
+        for idx, section in enumerate(sections):
+            section_id = str(section["id"])
+            title = str(section["title"])
+            active = idx == 0
+            active_cls = " is-active" if active else ""
+            selected = "true" if active else "false"
+            tabs.append(
+                f"<button type='button' class='workspace-tab{active_cls}' data-workspace-tab='{html.escape(section_id, quote=True)}' aria-selected='{selected}'>{html.escape(title)}</button>"
+            )
+            panels.append(render_workspace_section(section_id, title, str(section["html"]), active=active))
+        return (
+            "<div class='section-title'>Analytics workspace</div>"
+            "<div class='workspace-panel' data-workspace>"
+            "<div class='workspace-head'>"
+            "<div class='workspace-tabs' role='tablist'>"
+            f"{''.join(tabs)}"
+            "</div>"
+            "<div class='workspace-tools'>"
+            "<input type='search' class='workspace-search' data-workspace-search placeholder='Search active tables'>"
+            "<div class='workspace-periods' aria-label='Period filter'>"
+            "<span class='workspace-period-label'>Period</span>"
+            "<button type='button' class='workspace-period' data-workspace-period='day'>Day</button>"
+            "<button type='button' class='workspace-period' data-workspace-period='week'>Week</button>"
+            "<button type='button' class='workspace-period' data-workspace-period='month'>Month</button>"
+            "<button type='button' class='workspace-period' data-workspace-period='year'>Year</button>"
+            "<button type='button' class='workspace-period is-active' data-workspace-period='all' aria-pressed='true'>All time</button>"
+            "</div>"
+            "<label class='workspace-check'><input type='checkbox' data-workspace-active-only> Active rows only</label>"
+            "<label class='workspace-check'><input type='checkbox' data-workspace-hide-unmatched> Hide image-only rows</label>"
+            "</div>"
+            "</div>"
+            f"{''.join(panels)}"
+            "</div>"
+        )
+
     data_source_label = html.escape(selected_host.replace("https://", ""))
     polling_interval_value = runtime_status.get("poll_minutes")
     polling_interval = f"{polling_interval_value} min" if polling_interval_value not in (None, "") else "Not available"
@@ -1511,19 +2245,6 @@ def render_dashboard(
     hour_rows = [[html.escape(str(r['hour'])), str(r['posts']), fmt_num(r['avg_2h_reactions']), fmt_num(r['avg_24h_reactions']), fmt_num(r['avg_total_reactions']), fmt_num(r['avg_total_engagement']), chip(r['confidence'])] for r in hour_summary]
     weekday_rows = [[html.escape(str(r['weekday'])), str(r['posts']), fmt_num(r['avg_2h_reactions']), fmt_num(r['avg_24h_reactions']), fmt_num(r['avg_total_reactions']), fmt_num(r['avg_total_engagement']), chip(r['confidence'])] for r in weekday_summary]
 
-    def render_collapsible_section(title: str, inner_html: str, section_id: str, open_default: bool = False, hint: Optional[str] = None) -> str:
-        open_attr = " open" if open_default else ""
-        hint_html = f"<div class='acc-hint'>{html.escape(hint)}</div>" if hint else ""
-        return (
-            f"<details class='accordion-panel' data-acc-id='{html.escape(section_id, quote=True)}'{open_attr}>"
-            "<summary class='acc-summary'>"
-            f"<span class='acc-title'>{html.escape(title)}</span>"
-            "<span class='acc-icon' aria-hidden='true'></span>"
-            "</summary>"
-            f"<div class='acc-body'>{hint_html}{inner_html}</div>"
-            "</details>"
-        )
-
     css = """
     :root{--bg:#0b1020;--panel:#121a2f;--panel2:#161f38;--border:#263353;--text:#ebf1ff;--muted:#9baacf;--accent:#7fb3ff;--good:#2ea043;--warn:#d29922;--na:#5b657f;--shadow:0 10px 24px rgba(0,0,0,.18)}
     *{box-sizing:border-box} body{margin:0;padding:24px;font-family:Segoe UI,Arial,sans-serif;background:linear-gradient(180deg,#091126 0%,#0d1323 100%);color:var(--text)}
@@ -1533,14 +2254,17 @@ def render_dashboard(
     .metrics{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px}.metric-card,.panel,.feature-card{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow)}
     .metric-card{padding:18px;min-height:146px}.metric-label{font-size:13px;color:var(--muted);margin-bottom:10px}.metric-value{font-size:22px;font-weight:800;line-height:1.25}.metric-detail{margin-top:12px;font-size:12px;color:var(--muted)}
     .feature-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:18px}.feature-card{padding:18px;min-height:185px}.feature-title{font-size:22px;font-weight:700;margin-bottom:6px}.feature-sub{font-size:12px;color:var(--muted);margin-bottom:14px}.feature-score{font-size:38px;font-weight:800;margin-bottom:10px;font-variant-numeric:tabular-nums}.feature-post{font-size:16px;font-weight:700;margin-bottom:8px}.feature-note{font-size:13px;color:var(--muted);line-height:1.45}.empty-state{font-size:34px;font-weight:800;margin:18px 0 8px}
+    .visual-grid{display:grid;grid-template-columns:minmax(0,2fr) minmax(320px,1fr);grid-auto-rows:minmax(0,auto);gap:16px}.visual-card{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);padding:18px;overflow:hidden}.visual-card h2{margin:0 0 8px;font-size:18px}.visual-card .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}.visual-wide{grid-row:span 2}.chart-svg{display:block;width:100%;height:auto;min-height:220px}.chart-grid{stroke:#263353;stroke-width:1}.chart-axis-line{stroke:#42537a;stroke-width:1.2}.chart-axis{fill:var(--muted);font-size:11px}.chart-bar.reaction{fill:#7fb3ff}.chart-bar.collection{fill:#7ee787}.chart-legend{display:flex;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:12px}.chart-legend span{display:inline-flex;gap:7px;align-items:center}.legend-dot{display:inline-block;width:9px;height:9px;border-radius:50%}.legend-dot.reaction{background:#7fb3ff}.legend-dot.collection{background:#7ee787}.chart-empty{display:flex;align-items:center;min-height:110px;color:var(--muted);font-size:13px}.chart-mode{margin-bottom:10px;color:var(--muted);font-size:12px}.mix-row{display:grid;grid-template-columns:72px minmax(0,1fr) 42px;gap:10px;align-items:center;margin:12px 0}.mix-label,.mix-value{color:var(--muted);font-size:12px}.mix-value{text-align:right;color:var(--text);font-weight:800}.mix-track,.top-chart-track{height:10px;border-radius:999px;background:#0d1528;border:1px solid var(--border);overflow:hidden}.mix-fill,.top-chart-fill{display:block;height:100%;border-radius:999px}.top-chart-row{display:grid;grid-template-columns:minmax(120px,1.1fr) minmax(90px,.9fr) auto;gap:10px;align-items:center;margin:10px 0}.top-chart-label{min-width:0}.top-chart-label a{font-weight:800}.top-chart-label span{display:block;color:var(--muted);font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.top-chart-fill{background:linear-gradient(90deg,#7fb3ff,#7ee787)}.top-chart-value{color:var(--muted);font-size:11px;text-align:right;white-space:nowrap}
     .reaction-row{display:grid;grid-template-columns:repeat(4,1fr);gap:12px}.reaction-stat{background:#10182b;border:1px solid #31446f;border-radius:14px;padding:14px}.reaction-head{display:flex;gap:8px;align-items:center;font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em}.reaction-value{margin-top:10px;font-size:34px;font-weight:800;text-align:center;font-variant-numeric:tabular-nums}
     .rgroup{display:flex;gap:6px;flex-wrap:wrap;margin-top:14px}.rbadge{display:inline-flex;align-items:center;justify-content:center;gap:4px;white-space:nowrap;background:#10182b;border:1px solid #31446f;border-radius:999px;padding:5px 9px;box-sizing:border-box}.ricon{font-size:14px;line-height:1}.rnum{font-weight:700;font-variant-numeric:tabular-nums;font-size:14px}
     .chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:#1e2742;color:#d8e5ff;border:1px solid transparent}.chip.good{background:rgba(46,160,67,.15);color:#7ee787;border-color:rgba(46,160,67,.35)}.chip.mid{background:rgba(56,139,253,.16);color:#9cc3ff;border-color:rgba(56,139,253,.35)}.chip.warn{background:rgba(210,153,34,.16);color:#f2cc60;border-color:rgba(210,153,34,.35)}.chip.na{background:rgba(91,101,127,.18);color:#c8d1e8;border-color:rgba(91,101,127,.35)}
     .panel{padding:18px}.panel h2{margin:0 0 8px;font-size:18px}.panel .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}.clean-table{width:100%;border-collapse:collapse}.clean-table th,.clean-table td{padding:12px 10px;border-bottom:1px solid var(--border);text-align:center;vertical-align:top}.clean-table th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer;user-select:none}.clean-table th.sort-asc,.clean-table th.sort-desc{color:var(--accent)}.clean-table td.num,.clean-table th.num{text-align:center}.table-panel{overflow:auto}
-    .accordion-stack{display:grid;grid-template-columns:1fr;gap:16px;margin-top:18px}.accordion-panel{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.accordion-panel[open]{overflow:visible}.acc-summary{list-style:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:16px 18px;user-select:none}.acc-summary::-webkit-details-marker{display:none}.acc-title{font-size:18px;font-weight:700}.acc-icon{width:12px;height:12px;position:relative;flex:0 0 12px}.acc-icon::before,.acc-icon::after{content:'';position:absolute;background:var(--muted);border-radius:2px;transition:transform .18s ease,opacity .18s ease}.acc-icon::before{left:0;right:0;top:5px;height:2px}.acc-icon::after{top:0;bottom:0;left:5px;width:2px}.accordion-panel[open] .acc-icon::after{opacity:0;transform:scaleY(.2)}.acc-body{padding:0 18px 18px}.acc-hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}
-    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}.row-sub{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.35}.small-note{margin-top:14px;color:var(--muted);font-size:12px}
+    [hidden]{display:none!important}.artwork-cell{display:flex;align-items:center;gap:12px;min-width:230px;text-align:left}.preview-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;vertical-align:top}.clean-table .preview-link{width:56px;height:56px}.post-thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;background:#0d1528;border:1px solid var(--border);flex:0 0 56px}.thumb-missing{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;line-height:1.15;text-align:center;padding:6px}.thumb-missing[hidden]{display:none!important}.clean-table tr[data-post-detail-id]{cursor:pointer}.clean-table tr[data-post-detail-id]:hover td{background:rgba(127,179,255,.06)}
+    .workspace-panel{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.workspace-head{position:sticky;top:0;z-index:3;background:rgba(18,26,47,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:14px 16px}.workspace-tabs{display:flex;gap:8px;flex-wrap:wrap}.workspace-tab{border:1px solid var(--border);background:#10182b;color:var(--muted);padding:9px 12px;border-radius:8px;cursor:pointer;font-weight:700}.workspace-tab:hover,.workspace-tab.is-active{color:var(--text);border-color:#45629c;background:#17233f}.workspace-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}.workspace-search{min-width:260px;max-width:420px;flex:1;border:1px solid var(--border);background:#0d1528;color:var(--text);padding:10px 12px;border-radius:8px}.workspace-search::placeholder{color:var(--muted)}.workspace-check{display:inline-flex;gap:7px;align-items:center;color:var(--muted);font-size:13px}.workspace-check input{accent-color:var(--accent)}.workspace-periods{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap}.workspace-period-label{color:var(--muted);font-size:12px;margin-right:2px}.workspace-period{border:1px solid var(--border);background:#0d1528;color:var(--muted);padding:7px 9px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:800}.workspace-period:hover,.workspace-period.is-active{color:var(--text);border-color:#45629c;background:#17233f}.workspace-section{padding:0 16px 16px}.workspace-section[hidden]{display:none}.workspace-block{padding:18px 0;border-bottom:1px solid var(--border);overflow:auto}.workspace-block:last-child{border-bottom:0}.workspace-block h3{margin:0 0 8px;font-size:18px}.workspace-empty{display:none;margin:12px 0;color:var(--muted);font-size:13px}.workspace-section.is-filter-empty .workspace-empty{display:block}
+    .post-drawer-backdrop{position:fixed;inset:0;z-index:20;background:rgba(3,7,18,.62);display:flex;justify-content:flex-end}.post-drawer-backdrop[hidden]{display:none}.post-drawer{width:min(560px,100vw);height:100%;overflow:auto;background:#10182b;border-left:1px solid var(--border);box-shadow:-18px 0 40px rgba(0,0,0,.35);padding:22px;position:relative}.drawer-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border:1px solid var(--border);border-radius:8px;background:#17233f;color:var(--text);font-size:22px;line-height:1;cursor:pointer}.drawer-content h2{margin:0 44px 8px 0;font-size:22px}.drawer-hero{display:grid;grid-template-columns:168px 1fr;gap:16px;align-items:start;margin-bottom:18px}.drawer-preview{width:168px;height:168px;border-radius:8px;object-fit:cover;background:#0d1528;border:1px solid var(--border)}.drawer-muted{color:var(--muted);font-size:13px;line-height:1.45}.drawer-links{margin:8px 0;color:var(--muted)}.drawer-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.drawer-stat{border:1px solid var(--border);background:#0d1528;border-radius:8px;padding:12px}.drawer-stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:7px}.drawer-stat-value{font-size:22px;font-weight:800}.drawer-stat-detail{margin-top:4px;color:var(--muted);font-size:12px}.drawer-section{border-top:1px solid var(--border);padding-top:16px;margin-top:16px}.drawer-section h3{margin:0 0 10px;font-size:16px}.drawer-image-links{display:flex;gap:8px;flex-wrap:wrap}.drawer-image-links a,.drawer-image-links span{border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#0d1528}
+    a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}.row-sub{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.35}.delta-pos{color:#7ee787;font-weight:800}.delta-neg{color:#ff9b9b;font-weight:800}.small-note{margin-top:14px;color:var(--muted);font-size:12px}
     @media (max-width:1300px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media (max-width:900px){.feature-grid,.reaction-row{grid-template-columns:1fr}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}}
+    @media (max-width:900px){.feature-grid,.reaction-row,.visual-grid{grid-template-columns:1fr}.visual-wide{grid-row:auto}.top-chart-row{grid-template-columns:1fr}.top-chart-value{text-align:left}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}.workspace-search{min-width:100%}.workspace-tab{flex:1 1 auto}.drawer-hero{grid-template-columns:1fr}.drawer-preview{width:100%;height:auto;aspect-ratio:1/1}.drawer-stats{grid-template-columns:1fr}}
     """
 
     generated_at = utc_now_iso()
@@ -1549,7 +2273,7 @@ def render_dashboard(
     parts.append("<meta http-equiv='Cache-Control' content='no-store, no-cache, must-revalidate, max-age=0'>")
     parts.append("<meta http-equiv='Pragma' content='no-cache'><meta http-equiv='Expires' content='0'>")
     parts.append(f"<meta name='generated-at' content='{html.escape(generated_at, quote=True)}'>")
-    parts.append("<title>CivitAI Tracker v10.0.1</title>")
+    parts.append(f"<title>{html.escape(APP_TITLE)}</title>")
     parts.append(f"<style>{css}</style>")
     parts.append(COLLECTION_SECTION_CSS)
     parts.append(
@@ -1566,6 +2290,7 @@ def render_dashboard(
         "if(!Number.isNaN(parsed)) return {kind:'date', value:parsed};"
         "return {kind:'text', value:text.toLowerCase()};"
         "}"
+        "function cellSortText(row,index){var cell=row.children[index];if(!cell)return '';return cell.dataset.sortValue||cell.textContent||'';}"
         "document.querySelectorAll('table.clean-table').forEach(function(table){"
         "var headers=table.querySelectorAll('thead th');"
         "headers.forEach(function(th,index){"
@@ -1576,8 +2301,8 @@ def render_dashboard(
         "headers.forEach(function(h){h.classList.remove('sort-asc','sort-desc');});"
         "th.classList.add(nextDir==='asc' ? 'sort-asc' : 'sort-desc');"
         "rows.sort(function(a,b){"
-        "var av=sortValue((a.children[index]||{}).textContent);"
-        "var bv=sortValue((b.children[index]||{}).textContent);"
+        "var av=sortValue(cellSortText(a,index));"
+        "var bv=sortValue(cellSortText(b,index));"
         "var cmp=0;"
         "if(av.kind===bv.kind && (av.kind==='number'||av.kind==='date')) cmp=av.value-bv.value;"
         "else cmp=String(av.value).localeCompare(String(bv.value), undefined, {numeric:true, sensitivity:'base'});"
@@ -1587,18 +2312,82 @@ def render_dashboard(
         "});"
         "});"
         "});"
-        "document.querySelectorAll('details[data-acc-id]').forEach(function(el){"
-        "var key='civitaiTrackerAcc:'+el.dataset.accId;"
-        "var saved=localStorage.getItem(key);"
-        "if(saved==='open'){el.open=true;}else if(saved==='closed'){el.open=false;}"
-        "el.addEventListener('toggle', function(){localStorage.setItem(key, el.open ? 'open' : 'closed');});"
+        "function applyWorkspaceFilters(workspace){"
+        "var section=workspace.querySelector('.workspace-section:not([hidden])'); if(!section) return;"
+        "var search=workspace.querySelector('[data-workspace-search]');"
+        "var activeOnly=workspace.querySelector('[data-workspace-active-only]');"
+        "var hideUnmatched=workspace.querySelector('[data-workspace-hide-unmatched]');"
+        "var period=workspace.dataset.workspacePeriod||'all';"
+        "var query=((search&&search.value)||'').trim().toLowerCase();"
+        "var rows=Array.from(section.querySelectorAll('tbody tr'));"
+        "var hasActiveRows=rows.some(function(row){return row.dataset.activeRow==='1';});"
+        "var hasPeriodRows=rows.some(function(row){return row.dataset.periodAll==='1'||!!row.querySelector('[data-period-all=\"1\"]');});"
+        "function periodMatches(row,value){if(value==='all')return true;var key='period'+value.charAt(0).toUpperCase()+value.slice(1);return row.dataset[key]==='1'||!!row.querySelector('[data-period-'+value+'=\"1\"]');}"
+        "var visible=0;"
+        "rows.forEach(function(row){"
+        "var text=(row.textContent||'').toLowerCase();"
+        "var show=!query||text.indexOf(query)!==-1;"
+        "if(show&&period!=='all'&&hasPeriodRows) show=periodMatches(row,period);"
+        "if(show&&activeOnly&&activeOnly.checked&&hasActiveRows) show=row.dataset.activeRow==='1';"
+        "if(show&&hideUnmatched&&hideUnmatched.checked&&text.indexOf('post mapping not found locally')!==-1) show=false;"
+        "row.hidden=!show; if(show) visible+=1;"
         "});"
+        "section.classList.toggle('is-filter-empty', rows.length>0&&visible===0);"
+        "}"
+        "document.querySelectorAll('[data-workspace]').forEach(function(workspace){"
+        "var key='civitaiTrackerWorkspaceTab';"
+        "var periodKey='civitaiTrackerWorkspacePeriod';"
+        "var buttons=Array.from(workspace.querySelectorAll('[data-workspace-tab]'));"
+        "var sections=Array.from(workspace.querySelectorAll('[data-workspace-section]'));"
+        "var periodButtons=Array.from(workspace.querySelectorAll('[data-workspace-period]'));"
+        "function setPeriod(value){value=value||'all';workspace.dataset.workspacePeriod=value;periodButtons.forEach(function(button){var selected=button.dataset.workspacePeriod===value;button.classList.toggle('is-active',selected);button.setAttribute('aria-pressed',selected?'true':'false');});localStorage.setItem(periodKey,value);applyWorkspaceFilters(workspace);}"
+        "function setTab(id){"
+        "var found=sections.some(function(section){return section.dataset.workspaceSection===id;});"
+        "if(!found&&sections[0]) id=sections[0].dataset.workspaceSection;"
+        "buttons.forEach(function(button){var selected=button.dataset.workspaceTab===id;button.classList.toggle('is-active',selected);button.setAttribute('aria-selected',selected?'true':'false');});"
+        "sections.forEach(function(section){section.hidden=section.dataset.workspaceSection!==id;});"
+        "localStorage.setItem(key,id);"
+        "applyWorkspaceFilters(workspace);"
+        "}"
+        "buttons.forEach(function(button){button.addEventListener('click',function(){setTab(button.dataset.workspaceTab);});});"
+        "periodButtons.forEach(function(button){button.addEventListener('click',function(){setPeriod(button.dataset.workspacePeriod);});});"
+        "workspace.querySelectorAll('[data-workspace-search],[data-workspace-active-only],[data-workspace-hide-unmatched]').forEach(function(control){"
+        "control.addEventListener('input',function(){applyWorkspaceFilters(workspace);});"
+        "control.addEventListener('change',function(){applyWorkspaceFilters(workspace);});"
+        "});"
+        "setPeriod(localStorage.getItem(periodKey)||'all');"
+        "setTab(localStorage.getItem(key)||'');"
+        "});"
+        "function showPreviewFallback(img){var fallback=img.nextElementSibling;if(fallback){img.hidden=true;fallback.hidden=false;fallback.style.display='flex';}}"
+        "document.querySelectorAll('img.post-thumb,img.drawer-preview').forEach(function(img){"
+        "img.addEventListener('error',function(){showPreviewFallback(img);});"
+        "});"
+        "var drawer=document.querySelector('[data-post-drawer]');"
+        "var drawerContent=document.querySelector('[data-post-drawer-content]');"
+        "function closeDrawer(){if(drawer){drawer.hidden=true;document.body.style.overflow='';}}"
+        "function openDrawer(id){"
+        "if(!drawer||!drawerContent)return;"
+        "var tpl=document.querySelector('[data-post-detail-template=\"'+id+'\"]');"
+        "if(!tpl)return;"
+        "drawerContent.innerHTML=tpl.innerHTML;"
+        "drawer.hidden=false;document.body.style.overflow='hidden';"
+        "drawer.querySelectorAll('img.drawer-preview').forEach(function(img){img.addEventListener('error',function(){showPreviewFallback(img);});});"
+        "var close=drawer.querySelector('[data-post-drawer-close]'); if(close) close.focus();"
+        "}"
+        "document.querySelectorAll('[data-post-detail-id]').forEach(function(row){"
+        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.postDetailId);});"
+        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.postDetailId);}});"
+        "row.tabIndex=0;"
+        "});"
+        "document.querySelectorAll('[data-post-drawer-close]').forEach(function(button){button.addEventListener('click',closeDrawer);});"
+        "if(drawer){drawer.addEventListener('click',function(event){if(event.target===drawer)closeDrawer();});}"
+        "document.addEventListener('keydown',function(event){if(event.key==='Escape')closeDrawer();});"
         "});</script>"
     )
     parts.append("</head><body><div class='wrap'>")
     parts.append(
         "<div class='hero'>"
-        f"<div><h1>CivitAI Tracker v10.0.1</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong> · generated {html.escape(tz_helper.fmt_dt(generated_at))}</p></div>"
+        f"<div><h1>{html.escape(APP_TITLE)}</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong> · generated {html.escape(tz_helper.fmt_dt(generated_at))}</p></div>"
         f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )
@@ -1646,28 +2435,97 @@ def render_dashboard(
     parts.append(best_collection_card("Best art this week by collections", collection_period_summary['best_week'], collection_period_summary['week_label'], "No collection adds captured yet for the last 7 days."))
     parts.append("</div>")
 
+    parts.append(render_visual_overview())
+
     parts.append(render_posting_recommendations(suggested_windows, suggested_weekdays))
 
     if collections_html:
         parts.append(collections_html)
 
-    parts.append("<div class='accordion-stack'>")
-    parts.append(render_collapsible_section("Leaders by total reactions", render_leaders_table(by_total_reactions), "leaders", open_default=True))
-    parts.append(render_collapsible_section("Best first 24h", render_window_table("Best first 24h", first24_rows, "Reactions captured within first 24h window").replace("<div class='panel table-panel'><h2>Best first 24h</h2>", "").replace("</div>", "", 1), "best24", hint="Early performance snapshot based on collected first-day windows."))
-    parts.append(render_collapsible_section("Best first 2h", render_window_table("Best first 2h", first2_rows, "Reactions captured within first 2h window").replace("<div class='panel table-panel'><h2>Best first 2h</h2>", "").replace("</div>", "", 1), "best2", hint="Very early momentum based on the first two hours of captured data."))
-    parts.append(render_collapsible_section("Publish hour summary", render_summary_table(
-        "Publish hour summary",
-        hour_rows,
-        ["Hour", "Posts", "Avg 2h reactions", "Avg 24h reactions", "Avg total reactions", "Avg total engagement", "Confidence"],
-    ).replace("<div class='panel table-panel'><h2>Publish hour summary</h2>", "").replace("</div>", "", 1), "hours", hint="Average performance grouped by publication hour in your local timezone."))
-    parts.append(render_collapsible_section("Weekday summary", render_summary_table(
-        "Weekday summary",
-        weekday_rows,
-        ["Weekday", "Posts", "Avg 2h reactions", "Avg 24h reactions", "Avg total reactions", "Avg total engagement", "Confidence"],
-    ).replace("<div class='panel table-panel'><h2>Weekday summary</h2>", "").replace("</div>", "", 1), "weekdays", hint="Average performance grouped by weekday in your local timezone."))
-    parts.append(render_collapsible_section("Recent tracked posts", render_recent_posts(current_posts), "recent", open_default=True, hint="Latest posts included in the tracker after the configured start point."))
-    parts.append("</div>")
+    analytics_sections: List[Dict[str, Any]] = [
+        {
+            "id": "performance",
+            "title": "Performance",
+            "html": render_workspace_block(
+                "Post performance",
+                "Per-post monitoring view sorted by recent reaction and collection activity.",
+                render_post_performance_table(post_performance_rows),
+            ),
+        }
+    ]
+    if collection_tables_html:
+        analytics_sections.append(
+            {
+                "id": "collections",
+                "title": "Collections",
+                "html": collection_tables_html,
+            }
+        )
+    analytics_sections.extend(
+        [
+            {
+                "id": "timing",
+                "title": "Timing",
+                "html": "".join(
+                    [
+                        render_workspace_block(
+                            "Suggested posting windows",
+                            "Ranked timing candidates from posts already tracked in this database.",
+                            render_recommendation_table("hour recommendations", suggested_windows, "Hour"),
+                        ),
+                        render_workspace_block(
+                            "Suggested weekdays",
+                            "Weekday candidates use the same scoring basis as the hour recommendations.",
+                            render_recommendation_table("weekday recommendations", suggested_weekdays, "Weekday"),
+                        ),
+                        render_workspace_block(
+                            "Publish hour summary",
+                            "Average performance grouped by publication hour in your local timezone.",
+                            render_summary_table_content(
+                                hour_rows,
+                                ["Hour", "Posts", "Avg 2h reactions", "Avg 24h reactions", "Avg total reactions", "Avg total engagement", "Confidence"],
+                            ),
+                        ),
+                        render_workspace_block(
+                            "Weekday summary",
+                            "Average performance grouped by weekday in your local timezone.",
+                            render_summary_table_content(
+                                weekday_rows,
+                                ["Weekday", "Posts", "Avg 2h reactions", "Avg 24h reactions", "Avg total reactions", "Avg total engagement", "Confidence"],
+                            ),
+                        ),
+                    ]
+                ),
+            },
+            {
+                "id": "history",
+                "title": "History",
+                "html": "".join(
+                    [
+                        render_workspace_block("Leaders by total reactions", "", render_leaders_table(by_total_reactions)),
+                        render_workspace_block(
+                            "Best first 24h",
+                            "Early performance snapshot based on collected first-day windows.",
+                            render_window_table_content(first24_rows, "Reactions captured within first 24h window"),
+                        ),
+                        render_workspace_block(
+                            "Best first 2h",
+                            "Very early momentum based on the first two hours of captured data.",
+                            render_window_table_content(first2_rows, "Reactions captured within first 2h window"),
+                        ),
+                        render_workspace_block(
+                            "Recent tracked posts",
+                            "Latest posts included in the tracker after the configured start point.",
+                            render_recent_posts(current_posts),
+                        ),
+                    ]
+                ),
+            },
+        ]
+    )
+    parts.append(render_analytics_workspace(analytics_sections))
 
+    parts.append(render_post_detail_drawer(post_performance_rows))
     parts.append("</div></body></html>")
     write_dashboard_html(html_path, ''.join(parts))
 
@@ -1895,6 +2753,7 @@ def refresh_dashboard_from_config(config_path: str = "config.json") -> None:
         return
     conn = db_connect(runtime["db_path"])
     try:
+        init_db(conn)
         tz_helper = TimezoneHelper(runtime["tz_name"])
         render_dashboard(
             conn=conn,

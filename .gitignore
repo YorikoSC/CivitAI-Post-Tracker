@@ -10,6 +10,7 @@ probe_results/
 __pycache__/
 *.pyc
 .smoke_tmp/
+.tmp_build/
 .venv/
 venv/
 dist/

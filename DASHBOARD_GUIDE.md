@@ -37,6 +37,16 @@ The best-performing post for the last 7 days based on reaction gain during that 
 
 This is not based on lifetime totals.
 
+### Visual overview
+
+The visual overview adds lightweight local charts:
+
+- Daily activity for reaction gains and collection additions over the last 14 local days
+- Reaction mix for the current local day
+- Top post movement based on 7-day reaction and collection activity
+
+These charts are rendered directly in the generated HTML, without external scripts or network dependencies.
+
 ### Suggested posting windows
 
 Suggested posting time windows derived from historical performance.
@@ -45,15 +55,46 @@ These are advisory hints, not strict rules.
 
 A strong post can outperform a weak post even in a worse time slot.
 
-### Post list
+### Post performance table
 
-The post table usually includes:
+The post performance table lives in the Analytics workspace. It is a per-post monitoring view, sorted by recent activity by default.
+
+It usually includes:
 
 - Post ID / link
+- Lazy-loaded thumbnail preview when the local image table has a preview URL
 - Published time
-- Total reactions
-- Comments
+- Current reactions and comments
+- Average reactions per day
+- Reaction and comment gain today
+- Reaction and comment gain over the last 7 days
+- First 2h and first 24h reaction snapshots, when enough early data exists
+- Collection additions over the last 7 days
+- Image count
 - Last seen / last update
+
+Clicking a post performance row opens a detail drawer with a larger preview, compact metrics, post link, primary image link, and stored image links.
+
+Older local image rows may not have preview URLs yet. If an image ID is known, the preview cell falls back to an `Open image` link; otherwise it shows `No preview` until the next tracker run refreshes image metadata from CivitAI.
+
+### Analytics workspace
+
+Detailed tables are grouped into workspace tabs:
+
+- Performance
+- Collections
+- Timing
+- History
+
+The workspace includes active-table search, an active-rows filter for recent activity, and a filter that hides image-only collection rows when you want to focus only on mapped posts.
+
+Performance and Collections tables also support quick period filters:
+
+- Day
+- Week
+- Month
+- Year
+- All time
 
 ### Collections
 
@@ -65,9 +106,13 @@ It includes:
 - Affected images
 - Affected posts
 - Last collection event
-- Recent collection adds
-- Top posts by collection adds
-- Top images by collection adds
+- Recent collection adds in the Analytics workspace
+- Top posts by collection adds in the Analytics workspace
+- Top images by collection adds in the Analytics workspace
+
+Rows that say `Post mapping not found locally` are collection events for images that exist in the transaction feed but could not be mapped to a tracked post in the local `post_images` table. The dashboard still links those rows to the CivitAI image page.
+
+Collection image tables also show a preview column when preview URLs are known locally. If a preview URL is not stored yet or cannot be displayed, the fallback keeps the same thumbnail-sized slot and opens the image page. This can happen when the image exists but the preview is unavailable to the current browser/session, including restricted-content cases.
 
 ## Important interpretation notes
 
