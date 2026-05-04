@@ -70,6 +70,12 @@ python -m pip install -r requirements.txt
 .\launch_tracker.ps1
 ```
 
+If Windows blocks direct `.ps1` launch, use:
+
+```powershell
+.\launch_tracker.bat
+```
+
 Or directly:
 
 ```powershell
