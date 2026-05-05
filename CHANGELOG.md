@@ -24,12 +24,13 @@
 - Image metadata enrichment now builds CivitAI imagecache URLs from `image.getInfinite` UUID tokens and avoids nested profile/avatar URLs.
 - Dashboard browser sorting now honors explicit numeric/date sort values.
 - Visible app/dashboard labels and tracker user agents now report v10.1.
+- App startup now allows only one running instance per app folder to protect the shared config, API key file, and SQLite database.
 
 ### Notes
 - Existing local image rows without stored image IDs may still show `No preview` until a normal tracker run refreshes image metadata from CivitAI.
 - The v10.1 release scope is dashboard monitoring polish. Broader application UI redesign remains a good candidate for v10.2.
 - Portable update and rollback guidance is documented in `UPDATE_GUIDE.md`.
-- Source mode now uses `launch_tracker.bat` as the supported Explorer launcher; the problematic PowerShell source launcher was removed.
+- Source mode now uses `launch_tracker.pyw` as the supported no-console Explorer launcher; `launch_tracker.bat` remains as a console-backed fallback.
 
 ## v10.0.1
 

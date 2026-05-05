@@ -5,13 +5,71 @@ import ctypes
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
-import tkinter as tk
 import webbrowser
 from datetime import date
 from pathlib import Path
+
+
+def _short_windows_path(path: Path) -> str:
+    if not sys.platform.startswith("win"):
+        return str(path)
+    try:
+        raw_path = str(path)
+        buffer_size = ctypes.windll.kernel32.GetShortPathNameW(raw_path, None, 0)
+        if buffer_size <= 0:
+            return raw_path
+        buffer = ctypes.create_unicode_buffer(buffer_size)
+        result = ctypes.windll.kernel32.GetShortPathNameW(raw_path, buffer, buffer_size)
+        if result <= 0:
+            return raw_path
+        return buffer.value
+    except Exception:
+        return str(path)
+
+
+def _prepare_frozen_tcl_tk() -> None:
+    if not getattr(sys, "frozen", False):
+        return
+    bundle_root = Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent / "_internal"))
+    tcl_dir = bundle_root / "_tcl_data"
+    tk_dir = bundle_root / "_tk_data"
+    if sys.platform.startswith("win"):
+        runtime_roots = []
+        explicit_runtime = os.environ.get("CIVITAI_TCLTK_DIR", "").strip()
+        if explicit_runtime:
+            runtime_roots.append(Path(explicit_runtime))
+        runtime_roots.extend([
+            Path("C:\\Users\\Public") / "CivitAITracker" / "tcltk",
+            Path(os.environ.get("ProgramData", "C:\\ProgramData")) / "CivitAITracker" / "tcltk",
+        ])
+        for runtime_root in runtime_roots:
+            try:
+                runtime_root.mkdir(parents=True, exist_ok=True)
+                runtime_tcl = runtime_root / "_tcl_data"
+                runtime_tk = runtime_root / "_tk_data"
+                if tcl_dir.exists() and not (runtime_tcl / "init.tcl").exists():
+                    shutil.copytree(tcl_dir, runtime_tcl, dirs_exist_ok=True)
+                if tk_dir.exists() and not (runtime_tk / "tk.tcl").exists():
+                    shutil.copytree(tk_dir, runtime_tk, dirs_exist_ok=True)
+                if (runtime_tcl / "init.tcl").exists() and (runtime_tk / "tk.tcl").exists():
+                    tcl_dir = runtime_tcl
+                    tk_dir = runtime_tk
+                    break
+            except Exception:
+                continue
+    if tcl_dir.exists():
+        os.environ["TCL_LIBRARY"] = _short_windows_path(tcl_dir)
+    if tk_dir.exists():
+        os.environ["TK_LIBRARY"] = _short_windows_path(tk_dir)
+
+
+_prepare_frozen_tcl_tk()
+
+import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
@@ -66,6 +124,71 @@ def extract_post_id(value: str) -> int | None:
         if match:
             return int(match.group(1))
     return None
+
+
+class SingleInstanceLock:
+    def __init__(self, path: Path):
+        self.path = path
+        self.handle = None
+
+    def acquire(self) -> bool:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.handle = self.path.open("a+", encoding="utf-8")
+        try:
+            if sys.platform.startswith("win"):
+                import msvcrt
+
+                self.handle.seek(0)
+                if not self.handle.read(1):
+                    self.handle.write("0")
+                    self.handle.flush()
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_NBLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            self.handle.seek(0)
+            self.handle.truncate()
+            self.handle.write(str(os.getpid()))
+            self.handle.flush()
+            return True
+        except OSError:
+            self.release()
+            return False
+
+    def release(self) -> None:
+        if self.handle is None:
+            return
+        try:
+            if sys.platform.startswith("win"):
+                import msvcrt
+
+                self.handle.seek(0)
+                msvcrt.locking(self.handle.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                import fcntl
+
+                fcntl.flock(self.handle.fileno(), fcntl.LOCK_UN)
+        except OSError:
+            pass
+        try:
+            self.handle.close()
+        finally:
+            self.handle = None
+
+
+def show_already_running_message(runtime_dir: Path) -> None:
+    root = tk.Tk()
+    root.withdraw()
+    messagebox.showinfo(
+        "CivitAI Tracker",
+        "CivitAI Tracker is already running for this folder.\n\n"
+        f"{runtime_dir}\n\n"
+        "Open it from the tray icon, or use a separate folder for another account.",
+        parent=root,
+    )
+    root.destroy()
 
 
 class SettingsDialog(tk.Toplevel):
@@ -910,11 +1033,20 @@ def main():
     args = build_parser().parse_args()
     if args.hide_console:
         hide_console_window()
-    app = TrackerApp(minimized=args.minimized)
-    if args.setup:
-        app.after(200, app.open_settings)
-    app.mainloop()
+    runtime_dir = get_runtime_data_dir(__file__)
+    instance_lock = SingleInstanceLock(runtime_dir / ".civitai_tracker.lock")
+    if not instance_lock.acquire():
+        show_already_running_message(runtime_dir)
+        return 0
+    try:
+        app = TrackerApp(minimized=args.minimized)
+        if args.setup:
+            app.after(200, app.open_settings)
+        app.mainloop()
+        return 0
+    finally:
+        instance_lock.release()
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

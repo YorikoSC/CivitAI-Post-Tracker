@@ -18,7 +18,7 @@ CONFIG_FILE = "config.json"
 EXAMPLE_CONFIG_FILE = "config.example.json"
 CURRENT_CONFIG_VERSION = 2
 AUTOSTART_SHORTCUT_NAME = "CivitAI Post Tracker.lnk"
-SOURCE_LAUNCHER_FILE = "launch_tracker.bat"
+SOURCE_LAUNCHER_FILE = "launch_tracker.pyw"
 TIMEZONE_EXAMPLES = [
     "UTC",
     "Europe/Moscow",

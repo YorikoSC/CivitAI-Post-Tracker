@@ -5,6 +5,7 @@ api_key.txt
 csv/
 dashboard.html
 runtime_status.json
+.civitai_tracker.lock
 logs/
 probe_results/
 __pycache__/
