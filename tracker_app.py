@@ -744,6 +744,8 @@ class UpdateDialog(tk.Toplevel):
         notes = info.release_notes or "No release notes were published for this release."
         if info.update_available and self.asset is None:
             notes += "\n\nNo downloadable ZIP package is attached to this release. Open the release page and update manually."
+        if self.execution_mode != "frozen":
+            notes += "\n\nSource mode is updated through Git. Automatic apply is available only in the packaged EXE build."
         self._set_notes(notes)
         self._set_busy(False)
 
@@ -796,9 +798,14 @@ class UpdateDialog(tk.Toplevel):
         self.progress_var.set(100)
         self.progress_text_var.set("Done")
         self.status_var.set("Package downloaded.")
-        self._set_notes(
-            f"Downloaded:\n{target}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
-        )
+        if self.execution_mode == "frozen":
+            self._set_notes(
+                f"Downloaded:\n{target}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
+            )
+        else:
+            self._set_notes(
+                f"Downloaded:\n{target}\n\nSource mode is updated through Git. Use downloaded packages only for EXE/manual inspection."
+            )
         self._set_busy(False)
         messagebox.showinfo("Updates", "Update package downloaded.", parent=self)
 
