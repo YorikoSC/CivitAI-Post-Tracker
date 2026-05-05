@@ -422,7 +422,7 @@ def call_buzz_transactions_page(
         "Accept": "application/json",
         "Authorization": f"Bearer {api_key}",
         "Referer": f"{host.rstrip('/')}/user/transactions?accountType={account_type}",
-        "User-Agent": "CivitAI-Tracker-v10.1/1.0",
+        "User-Agent": "CivitAI-Tracker-v10.1.1/1.0",
     }
     resp = session.get(url, headers=headers, timeout=timeout_seconds)
     resp.raise_for_status()

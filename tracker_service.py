@@ -27,7 +27,7 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
 
 DEFAULT_TIMEOUT = 30
-APP_VERSION = "10.1"
+APP_VERSION = "10.1.1"
 APP_TITLE = f"CivitAI Tracker v{APP_VERSION}"
 DEFAULT_VIEW_HOST = "https://civitai.red"
 DEFAULT_API_MODE = "red"

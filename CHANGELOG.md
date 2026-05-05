@@ -1,5 +1,23 @@
 # Changelog
 
+## v10.1.1
+
+### Added
+- Added `launch_tracker.pyw` as the supported no-console source launcher for Explorer/right-click startup.
+- Added `launch_tracker.bat` as a console-backed fallback for troubleshooting source-mode startup.
+- Added a single-instance guard so one app folder cannot run multiple tracker instances against the same config, API key file, and SQLite database.
+
+### Changed
+- Source-mode autostart now points to the windowed Python launcher instead of the removed PowerShell launcher.
+- The EXE build script now prefers the local `.venv` Python environment and isolates user-site packages during PyInstaller builds.
+- Frozen startup now prepares bundled Tcl/Tk paths before importing Tkinter, improving EXE launch reliability from non-ASCII Windows paths.
+- Visible app/dashboard labels and tracker user agents now report v10.1.1.
+- Private Codex handoff notes are now ignored by git and kept out of tracked release files.
+
+### Notes
+- This is a patch release for v10.1. It does not change the dashboard feature scope.
+- For another tracked CivitAI account, use a separate app folder so each copy has its own config, API key, and database.
+
 ## v10.1
 
 ### Added
@@ -12,7 +30,6 @@
 - Added quick period filters for Performance and Collections tables: day, week, month, year, and all time.
 - Added preview columns for collection image tables when local preview URLs are available.
 - Added image URL storage in `post_images` via `image_url` and `thumbnail_url`.
-- Added `CODEX_CONTEXT.md` as a cross-machine Codex handoff note.
 - Added smoke tests for post performance metrics, image-only collection links, and CivitAI imagecache preview URL handling.
 
 ### Changed
@@ -24,13 +41,11 @@
 - Image metadata enrichment now builds CivitAI imagecache URLs from `image.getInfinite` UUID tokens and avoids nested profile/avatar URLs.
 - Dashboard browser sorting now honors explicit numeric/date sort values.
 - Visible app/dashboard labels and tracker user agents now report v10.1.
-- App startup now allows only one running instance per app folder to protect the shared config, API key file, and SQLite database.
 
 ### Notes
 - Existing local image rows without stored image IDs may still show `No preview` until a normal tracker run refreshes image metadata from CivitAI.
 - The v10.1 release scope is dashboard monitoring polish. Broader application UI redesign remains a good candidate for v10.2.
 - Portable update and rollback guidance is documented in `UPDATE_GUIDE.md`.
-- Source mode now uses `launch_tracker.pyw` as the supported no-console Explorer launcher; `launch_tracker.bat` remains as a console-backed fallback.
 
 ## v10.0.1
 

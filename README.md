@@ -1,10 +1,12 @@
-# CivitAI Tracker v10.1
+# CivitAI Tracker v10.1.1
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
 v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
 
 v10.1 turns the dashboard into a monitoring workspace: post performance rows, lazy image previews, a post detail drawer, and filtered analytics tabs for performance, collections, timing, and history.
+
+v10.1.1 is a patch release focused on reliable source/EXE startup, no-console launching from Explorer, and one-instance-per-folder safety.
 
 ## Features
 
@@ -214,11 +216,12 @@ If collection tracking is empty, verify that your API key is configured, recent 
 Before publishing or merging a cleanup branch:
 
 1. Run the syntax check above.
-2. Run the app from source and confirm `Run now` updates `logs/core_last.log`.
-3. Build with `build_exe.bat`.
-4. Launch `dist\CivitAITracker\CivitAITracker.exe`.
-5. Test with and without an API key.
-6. Open the dashboard from the app and confirm the `generated ...` timestamp changes after a run.
+2. Launch `launch_tracker.pyw` from Explorer and confirm the app opens without a console window.
+3. Run the app from source and confirm `Run now` updates `logs/core_last.log`.
+4. Build with `build_exe.bat`.
+5. Launch `dist\CivitAITracker\CivitAITracker.exe`.
+6. Test with and without an API key.
+7. Open the dashboard from the app and confirm the `generated ...` timestamp changes after a run.
 
 
 ## Collection sync modes
