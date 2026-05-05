@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
+import subprocess
 import sys
 import unittest
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -86,6 +89,96 @@ class UpdateManagerSmokeTests(unittest.TestCase):
         for name in ("config.json", "api_key.txt", "civitai_tracker.db", "csv", "logs", "updates"):
             self.assertIn(name, RUNTIME_PRESERVE_NAMES)
             self.assertIn(name, script)
+
+    def test_update_applier_replaces_app_files_and_keeps_runtime_files(self) -> None:
+        if not sys.platform.startswith("win") or shutil.which("powershell.exe") is None:
+            self.skipTest("Windows PowerShell is required for the update applier smoke test.")
+
+        root = smoke_path("update_apply", "")
+        app_dir = root / "app"
+        payload_parent = root / "payload"
+        payload_root = payload_parent / "CivitAITracker"
+        package_path = root / "CivitAITracker-update.zip"
+        log_path = app_dir / "updates" / "update_apply.log"
+        script_path = app_dir / "updates" / "apply_update.ps1"
+
+        try:
+            (app_dir / "_internal").mkdir(parents=True)
+            (app_dir / "csv").mkdir()
+            (app_dir / "logs").mkdir()
+            (app_dir / "updates").mkdir()
+            (app_dir / "CivitAITracker.exe").write_text("old exe", encoding="utf-8")
+            (app_dir / "_internal" / "old.txt").write_text("old internal", encoding="utf-8")
+            (app_dir / "README.md").write_text("old readme", encoding="utf-8")
+            (app_dir / "config.json").write_text("keep config", encoding="utf-8")
+            (app_dir / "api_key.txt").write_text("keep key", encoding="utf-8")
+            (app_dir / "civitai_tracker.db").write_text("keep db", encoding="utf-8")
+            (app_dir / "csv" / "snapshot.csv").write_text("keep csv", encoding="utf-8")
+            (app_dir / "logs" / "app.log").write_text("keep log", encoding="utf-8")
+            (app_dir / "dashboard.html").write_text("keep dashboard", encoding="utf-8")
+            (app_dir / "runtime_status.json").write_text("keep status", encoding="utf-8")
+
+            (payload_root / "_internal").mkdir(parents=True)
+            (payload_root / "CivitAITracker.exe").write_text("new exe", encoding="utf-8")
+            (payload_root / "_internal" / "new.txt").write_text("new internal", encoding="utf-8")
+            (payload_root / "README.md").write_text("new readme", encoding="utf-8")
+            (payload_root / "config.json").write_text("do not copy config", encoding="utf-8")
+
+            with zipfile.ZipFile(package_path, "w") as package:
+                for path in payload_parent.rglob("*"):
+                    if path.is_file():
+                        package.write(path, path.relative_to(payload_parent))
+
+            script_path.write_text(build_update_applier_script(), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script_path),
+                    "-PackagePath",
+                    str(package_path),
+                    "-AppDir",
+                    str(app_dir),
+                    "-PidToWait",
+                    "0",
+                    "-RestartPath",
+                    str(app_dir / "does-not-exist.exe"),
+                    "-LogPath",
+                    str(log_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((app_dir / "CivitAITracker.exe").read_text(encoding="utf-8"), "new exe")
+            self.assertEqual((app_dir / "_internal" / "new.txt").read_text(encoding="utf-8"), "new internal")
+            self.assertFalse((app_dir / "_internal" / "old.txt").exists())
+            self.assertEqual((app_dir / "README.md").read_text(encoding="utf-8"), "new readme")
+            self.assertEqual((app_dir / "config.json").read_text(encoding="utf-8"), "keep config")
+            self.assertEqual((app_dir / "api_key.txt").read_text(encoding="utf-8"), "keep key")
+            self.assertEqual((app_dir / "civitai_tracker.db").read_text(encoding="utf-8"), "keep db")
+            self.assertEqual((app_dir / "csv" / "snapshot.csv").read_text(encoding="utf-8"), "keep csv")
+            self.assertEqual((app_dir / "logs" / "app.log").read_text(encoding="utf-8"), "keep log")
+            self.assertEqual((app_dir / "dashboard.html").read_text(encoding="utf-8"), "keep dashboard")
+            self.assertEqual((app_dir / "runtime_status.json").read_text(encoding="utf-8"), "keep status")
+
+            backups = list((app_dir / "updates").glob("backup-*"))
+            self.assertEqual(len(backups), 1)
+            backup_dir = backups[0]
+            self.assertEqual((backup_dir / "CivitAITracker.exe").read_text(encoding="utf-8"), "old exe")
+            self.assertEqual((backup_dir / "_internal" / "old.txt").read_text(encoding="utf-8"), "old internal")
+            self.assertEqual((backup_dir / "README.md").read_text(encoding="utf-8"), "old readme")
+            self.assertIn("Update applied successfully", log_path.read_text(encoding="utf-8"))
+        finally:
+            try:
+                shutil.rmtree(root, ignore_errors=True)
+            except OSError:
+                pass
 
 
 class CollectionParserSmokeTests(unittest.TestCase):
