@@ -16,6 +16,8 @@ __pycache__/
 venv/
 dist/
 build/
+release/
+updates/
 app.log
 core_last.log
 probe_results_transactions/

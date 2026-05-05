@@ -20,6 +20,33 @@ runtime_status.json
 
 The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.db`.
 
+## In-App Update Check
+
+1. Open **Updates** in the app.
+2. Wait for the GitHub release check.
+3. If an update is available, open the release page or download the attached ZIP package.
+4. The downloaded package is saved to `updates/`.
+
+The app can also check for updates in the background on launch. This can be changed in **Settings**.
+
+The Update Center does not replace files while the app is running. It is the safe first step before a full automatic updater.
+
+## Release Packages
+
+Release ZIP packages should be built with:
+
+```powershell
+package_release.bat
+```
+
+The package is written to:
+
+```text
+release\CivitAITracker-v<version>-win64.zip
+```
+
+Attach that ZIP to the GitHub Release so the app can find and download it.
+
 ## Portable EXE Update
 
 1. Build or download the new `dist\CivitAITracker` folder.

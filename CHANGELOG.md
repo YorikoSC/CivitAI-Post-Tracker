@@ -1,5 +1,16 @@
 # Changelog
 
+## v10.2.0-dev
+
+### Added
+- Added an in-app Update Center that checks GitHub releases, compares the current version with the latest public release, opens release notes, and downloads attached ZIP update packages.
+- Added optional background update checks on app launch.
+- Added shared app metadata in `app_info.py` so app title, dashboard title, user agents, and update checks use the same version source.
+- Added `package_release.bat` to build the EXE and create a release ZIP asset for GitHub Releases.
+
+### Changed
+- Updated documentation around portable updates to reflect the Update Center and release package flow.
+
 ## v10.1.1
 
 ### Added

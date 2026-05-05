@@ -1,4 +1,4 @@
-# CivitAI Tracker v10.1.1
+# CivitAI Tracker v10.2.0-dev
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
@@ -7,6 +7,8 @@ v10 adds **collection tracking**: the dashboard can now show which of your image
 v10.1 turns the dashboard into a monitoring workspace: post performance rows, lazy image previews, a post detail drawer, and filtered analytics tabs for performance, collections, timing, and history.
 
 v10.1.1 is a patch release focused on reliable source/EXE startup, no-console launching from Explorer, and one-instance-per-folder safety.
+
+v10.2 development starts with a built-in Update Center for checking GitHub releases and downloading portable update packages.
 
 ## Features
 
@@ -19,6 +21,7 @@ v10.1.1 is a patch release focused on reliable source/EXE startup, no-console la
 - Suggested posting windows based on historical performance
 - HTML dashboard with runtime status
 - Auto polling with tray support
+- Update Center for GitHub release checks and portable package downloads
 - Source mode launcher via windowed Python launcher
 - Single running instance per app folder to protect the local config and database
 - EXE build flow via PyInstaller (`onedir`)
@@ -105,7 +108,9 @@ On first launch, open **Settings**, save your configuration, then use **Diagnost
 
 ## Updating
 
-The app is currently updated as a portable folder replacement. Before updating, close the app and back up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
+Open **Updates** in the app to check the latest GitHub release and download an attached portable ZIP package.
+
+By default, the app also checks for updates in the background on launch. The app is still updated as a portable folder replacement. Before replacing app files, close the app and back up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
 
 See `UPDATE_GUIDE.md` for the full update and rollback checklist.
 
@@ -127,6 +132,7 @@ Important collection-related settings:
     "config_version": 2
   },
   "options": {
+    "check_updates_on_launch": true,
     "enable_collection_tracking": true
   },
   "collection_tracking": {

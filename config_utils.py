@@ -114,6 +114,7 @@ def default_config() -> dict[str, Any]:
             "launch_with_windows": False,
             "start_minimized": False,
             "start_auto_polling_on_launch": False,
+            "check_updates_on_launch": True,
             "enable_collection_tracking": True,
         },
         "collection_tracking": {

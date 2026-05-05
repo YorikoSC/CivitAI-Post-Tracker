@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 from urllib.parse import quote
 
+from app_info import APP_VERSION
 from collection_sync_state import (
     count_collection_events,
     ensure_collection_sync_schema,
@@ -422,7 +423,7 @@ def call_buzz_transactions_page(
         "Accept": "application/json",
         "Authorization": f"Bearer {api_key}",
         "Referer": f"{host.rstrip('/')}/user/transactions?accountType={account_type}",
-        "User-Agent": "CivitAI-Tracker-v10.1.1/1.0",
+        "User-Agent": f"CivitAI-Tracker-v{APP_VERSION}/1.0",
     }
     resp = session.get(url, headers=headers, timeout=timeout_seconds)
     resp.raise_for_status()

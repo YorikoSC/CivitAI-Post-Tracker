@@ -14,6 +14,20 @@ Output:
 dist\CivitAITracker\CivitAITracker.exe
 ```
 
+## Release ZIP
+
+```powershell
+package_release.bat
+```
+
+Output:
+
+```text
+release\CivitAITracker-v<version>-win64.zip
+```
+
+Attach this ZIP to the GitHub Release. The in-app Update Center looks for ZIP assets on the latest release.
+
 ## What to test after build
 
 1. Launch `CivitAITracker.exe`.

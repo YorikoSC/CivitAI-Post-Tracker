@@ -81,6 +81,7 @@ except Exception:  # pragma: no cover
     Image = None
     ImageDraw = None
 
+from app_info import APP_NAME, APP_TITLE, APP_VERSION, GITHUB_RELEASES_PAGE
 from config_utils import (
     TIMEZONE_EXAMPLES,
     autostart_enabled,
@@ -102,6 +103,14 @@ from config_utils import (
     validate_config,
 )
 from tracker_runner import TrackerRunner
+from update_manager import (
+    ReleaseAsset,
+    UpdateInfo,
+    choose_download_asset,
+    download_asset,
+    fetch_latest_release,
+    format_bytes,
+)
 
 
 APP_BG = "#101317"
@@ -232,6 +241,7 @@ class SettingsDialog(tk.Toplevel):
         self.launch_with_windows_var = tk.BooleanVar(value=bool(deep_get(config, "options.launch_with_windows", False) or autostart_enabled()))
         self.start_minimized_var = tk.BooleanVar(value=bool(deep_get(config, "options.start_minimized", False)))
         self.start_auto_polling_on_launch_var = tk.BooleanVar(value=bool(deep_get(config, "options.start_auto_polling_on_launch", False)))
+        self.check_updates_on_launch_var = tk.BooleanVar(value=bool(deep_get(config, "options.check_updates_on_launch", True)))
 
         self.db_var = tk.StringVar(value=deep_get(config, "paths.db", "civitai_tracker.db"))
         self.csv_var = tk.StringVar(value=deep_get(config, "paths.csv_dir", "csv"))
@@ -426,6 +436,9 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(self.app_tab, text="Start auto polling on launch", variable=self.start_auto_polling_on_launch_var).grid(row=row, column=1, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Automatically start background polling when the app launches. Recommended for startup and tray-only use.")
+        ttk.Checkbutton(self.app_tab, text="Check for updates on launch", variable=self.check_updates_on_launch_var).grid(row=row, column=1, sticky="w")
+        row += 1
+        row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts.")
         self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use the tray menu to exit fully.")
 
     def _show_timezone_examples(self):
@@ -529,6 +542,7 @@ class SettingsDialog(tk.Toplevel):
         cfg["options"]["launch_with_windows"] = bool(self.launch_with_windows_var.get())
         cfg["options"]["start_minimized"] = bool(self.start_minimized_var.get())
         cfg["options"]["start_auto_polling_on_launch"] = bool(self.start_auto_polling_on_launch_var.get())
+        cfg["options"]["check_updates_on_launch"] = bool(self.check_updates_on_launch_var.get())
 
         errors = validate_config(cfg)
         if errors:
@@ -580,10 +594,219 @@ class DiagnosticsDialog(tk.Toplevel):
         self.update_idletasks()
 
 
+class UpdateDialog(tk.Toplevel):
+    def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
+        super().__init__(master)
+        self.title("Updates")
+        self.geometry("760x560")
+        self.minsize(720, 520)
+        self.runtime_dir = runtime_dir
+        self.execution_mode = execution_mode
+        self.open_path = open_path
+        self.info: UpdateInfo | None = None
+        self.asset: ReleaseAsset | None = None
+        self.downloaded_path: Path | None = None
+        self.is_busy = False
+
+        self.status_var = tk.StringVar(value="Ready to check.")
+        self.current_var = tk.StringVar(value=f"v{APP_VERSION}")
+        self.latest_var = tk.StringVar(value="-")
+        self.asset_var = tk.StringVar(value="-")
+        self.progress_var = tk.DoubleVar(value=0)
+        self.progress_text_var = tk.StringVar(value="")
+
+        self._build()
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.after(150, self.check_now)
+
+    def _build(self):
+        self.configure(bg=APP_BG)
+        wrapper = ttk.Frame(self, padding=14)
+        wrapper.pack(fill="both", expand=True)
+        wrapper.columnconfigure(0, weight=1)
+        wrapper.rowconfigure(2, weight=1)
+
+        header = tk.Frame(wrapper, bg=HEADER_BG, padx=14, pady=14)
+        header.grid(row=0, column=0, sticky="ew")
+        tk.Label(header, text="Updates", bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 16, "bold")).pack(anchor="w")
+        tk.Label(
+            header,
+            text="Check GitHub releases and download the latest portable package.",
+            bg=HEADER_BG,
+            fg="#f4d9db",
+            font=("Segoe UI", 10),
+        ).pack(anchor="w", pady=(4, 0))
+
+        summary = ttk.Frame(wrapper)
+        summary.grid(row=1, column=0, sticky="ew", pady=(12, 8))
+        summary.columnconfigure(1, weight=1)
+        summary.columnconfigure(3, weight=1)
+        rows = [
+            ("Current version", self.current_var),
+            ("Latest release", self.latest_var),
+            ("Package", self.asset_var),
+            ("Status", self.status_var),
+        ]
+        for idx, (label, var) in enumerate(rows):
+            row = idx // 2
+            col = (idx % 2) * 2
+            ttk.Label(summary, text=label).grid(row=row, column=col, sticky="w", padx=(0, 8), pady=4)
+            ttk.Label(summary, textvariable=var, wraplength=250).grid(row=row, column=col + 1, sticky="w", pady=4)
+
+        self.notes_text = ScrolledText(wrapper, height=13, wrap="word")
+        self.notes_text.grid(row=2, column=0, sticky="nsew", pady=(4, 8))
+        self._set_notes("Release notes will appear here after the check.")
+
+        progress_row = ttk.Frame(wrapper)
+        progress_row.grid(row=3, column=0, sticky="ew")
+        progress_row.columnconfigure(0, weight=1)
+        self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
+        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        ttk.Label(progress_row, textvariable=self.progress_text_var, width=18).grid(row=0, column=1, sticky="e")
+
+        buttons = ttk.Frame(wrapper)
+        buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now)
+        self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled")
+        self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled")
+        self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads)
+        self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy)
+        self.check_btn.pack(side="left")
+        self.release_btn.pack(side="left", padx=(8, 0))
+        self.download_btn.pack(side="left", padx=(8, 0))
+        self.downloads_btn.pack(side="left", padx=(8, 0))
+        self.close_btn.pack(side="right")
+
+    def _set_notes(self, text: str):
+        self.notes_text.configure(state="normal")
+        self.notes_text.delete("1.0", "end")
+        self.notes_text.insert("1.0", text)
+        self.notes_text.configure(state="disabled")
+
+    def _run_on_ui(self, callback, *args):
+        try:
+            self.after(0, lambda: self._dispatch_on_ui(callback, *args))
+        except tk.TclError:
+            pass
+
+    def _dispatch_on_ui(self, callback, *args):
+        try:
+            if self.winfo_exists():
+                callback(*args)
+        except tk.TclError:
+            pass
+
+    def _set_busy(self, busy: bool):
+        self.is_busy = busy
+        self.check_btn.configure(state="disabled" if busy else "normal")
+        self.release_btn.configure(state="disabled" if busy or self.info is None else "normal")
+        can_download = bool(self.asset is not None and self.info is not None and self.info.update_available)
+        self.download_btn.configure(state="disabled" if busy or not can_download else "normal")
+
+    def check_now(self):
+        if self.is_busy:
+            return
+        self.info = None
+        self.asset = None
+        self.latest_var.set("Checking...")
+        self.asset_var.set("-")
+        self.status_var.set("Checking for updates...")
+        self.progress_var.set(0)
+        self.progress_text_var.set("")
+        self._set_notes("Checking GitHub releases...")
+        self._set_busy(True)
+        threading.Thread(target=self._check_worker, daemon=True).start()
+
+    def _check_worker(self):
+        try:
+            info = fetch_latest_release(current_version=APP_VERSION)
+            self._run_on_ui(self._apply_update_info, info)
+        except Exception as exc:
+            self._run_on_ui(self._show_error, str(exc))
+
+    def _apply_update_info(self, info: UpdateInfo):
+        self.info = info
+        self.asset = choose_download_asset(info, self.execution_mode)
+        self.latest_var.set(info.latest_tag or info.latest_version)
+        if self.asset:
+            self.asset_var.set(f"{self.asset.name} ({format_bytes(self.asset.size)})")
+        else:
+            self.asset_var.set("No ZIP package attached")
+
+        self.status_var.set("Update available." if info.update_available else "You are up to date.")
+        notes = info.release_notes or "No release notes were published for this release."
+        if info.update_available and self.asset is None:
+            notes += "\n\nNo downloadable ZIP package is attached to this release. Open the release page and update manually."
+        self._set_notes(notes)
+        self._set_busy(False)
+
+    def _show_error(self, message: str):
+        self.status_var.set("Update check failed.")
+        self.latest_var.set("-")
+        self.asset_var.set("-")
+        self._set_notes(message)
+        self._set_busy(False)
+
+    def open_release(self):
+        url = self.info.release_url if self.info else GITHUB_RELEASES_PAGE
+        webbrowser.open(url)
+
+    def open_downloads(self):
+        downloads_dir = self.runtime_dir / "updates"
+        downloads_dir.mkdir(exist_ok=True)
+        self.open_path(downloads_dir)
+
+    def download_update(self):
+        if self.is_busy or self.asset is None:
+            return
+        self.status_var.set("Downloading package...")
+        self.progress_var.set(0)
+        self.progress_text_var.set("")
+        self._set_busy(True)
+        threading.Thread(target=self._download_worker, args=(self.asset,), daemon=True).start()
+
+    def _download_worker(self, asset: ReleaseAsset):
+        try:
+            target = download_asset(
+                asset,
+                self.runtime_dir / "updates",
+                progress=lambda done, total: self._run_on_ui(self._set_progress, done, total),
+            )
+            self._run_on_ui(self._download_finished, target)
+        except Exception as exc:
+            self._run_on_ui(self._download_failed, str(exc))
+
+    def _set_progress(self, done: int, total: int):
+        if total > 0:
+            percent = min(100, max(0, (done / total) * 100))
+            self.progress_var.set(percent)
+            self.progress_text_var.set(f"{percent:.0f}%")
+        else:
+            self.progress_text_var.set(format_bytes(done))
+
+    def _download_finished(self, target: Path):
+        self.downloaded_path = target
+        self.progress_var.set(100)
+        self.progress_text_var.set("Done")
+        self.status_var.set("Package downloaded.")
+        self._set_notes(
+            f"Downloaded:\n{target}\n\nClose {APP_NAME} before replacing app files. Keep your config, API key, database, CSV, logs, dashboard, and runtime status files."
+        )
+        self._set_busy(False)
+        messagebox.showinfo("Updates", "Update package downloaded.", parent=self)
+
+    def _download_failed(self, message: str):
+        self.status_var.set("Download failed.")
+        self._set_notes(message)
+        self._set_busy(False)
+
+
 class TrackerApp(tk.Tk):
     def __init__(self, minimized: bool = False):
         super().__init__()
-        self.title("CivitAI Tracker")
+        self.title(APP_TITLE)
         self.geometry("980x700")
         self.minsize(920, 620)
         self.configure(bg=APP_BG)
@@ -626,6 +849,8 @@ class TrackerApp(tk.Tk):
 
         if deep_get(self.config_data, "options.start_auto_polling_on_launch", False):
             self.after(700 if launch_hidden else 450, self._start_auto_on_launch)
+        if deep_get(self.config_data, "options.check_updates_on_launch", True):
+            self.after(1800, self._check_updates_on_launch)
 
     def _build_ui(self):
         style = ttk.Style(self)
@@ -639,7 +864,7 @@ class TrackerApp(tk.Tk):
 
         header = tk.Frame(shell, bg=HEADER_BG, padx=18, pady=16)
         header.pack(fill="x")
-        tk.Label(header, text="CivitAI Tracker", bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        tk.Label(header, text=APP_TITLE, bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 18, "bold")).pack(anchor="w")
         tk.Label(
             header,
             text="Local post analytics, auto polling, and dashboard generation for CivitAI.",
@@ -717,6 +942,7 @@ class TrackerApp(tk.Tk):
         self.data_btn = ttk.Button(actions, text="Open data folder", command=self.open_data_folder)
         self.logs_btn = ttk.Button(actions, text="Open logs", command=self.open_logs)
         self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics)
+        self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates)
         self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray)
 
         buttons = [
@@ -728,6 +954,7 @@ class TrackerApp(tk.Tk):
             self.data_btn,
             self.logs_btn,
             self.diagnostics_btn,
+            self.updates_btn,
             self.tray_btn,
         ]
         for i, btn in enumerate(buttons):
@@ -859,6 +1086,26 @@ class TrackerApp(tk.Tk):
         self.last_diagnostics_report = report
         DiagnosticsDialog(self, report)
 
+    def open_updates(self):
+        UpdateDialog(self, self.runtime_dir, get_execution_mode(), self._open_path)
+
+    def _check_updates_on_launch(self):
+        threading.Thread(target=self._startup_update_worker, daemon=True).start()
+
+    def _startup_update_worker(self):
+        try:
+            info = fetch_latest_release(current_version=APP_VERSION, timeout_seconds=12)
+        except Exception:
+            return
+        if not info.update_available:
+            return
+        latest = info.latest_tag or info.latest_version
+        self._enqueue_log(f"Update available: {latest}. Open Updates to download it.")
+        try:
+            self.after(0, lambda: self._set_status_line(f"Update available: {latest}."))
+        except tk.TclError:
+            pass
+
     def _apply_startup_diagnostics(self, hidden_launch: bool):
         report = self.last_diagnostics_report or {}
         if not report:
@@ -903,6 +1150,10 @@ class TrackerApp(tk.Tk):
                 self._enqueue_log("Auto polling will start automatically on launch.")
             else:
                 self._enqueue_log("Auto polling on launch is disabled.")
+            if deep_get(cfg, "options.check_updates_on_launch", True):
+                self._enqueue_log("Update check on launch is enabled.")
+            else:
+                self._enqueue_log("Update check on launch is disabled.")
 
         SettingsDialog(self, self.runtime_dir, current, on_save)
 
@@ -934,6 +1185,7 @@ class TrackerApp(tk.Tk):
                 pystray.MenuItem("Stop auto polling", lambda icon, item: self.after(0, self.stop_auto)),
                 pystray.MenuItem("Open dashboard", lambda icon, item: self.after(0, self.open_dashboard)),
                 pystray.MenuItem("Diagnostics", lambda icon, item: self.after(0, self.open_diagnostics)),
+                pystray.MenuItem("Updates", lambda icon, item: self.after(0, self.open_updates)),
                 pystray.MenuItem("Exit", lambda icon, item: self.after(0, self.exit_app)),
             )
             self.tray_icon = pystray.Icon("civitai_tracker", self._create_tray_image(), "CivitAI Tracker", menu)

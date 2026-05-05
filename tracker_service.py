@@ -15,6 +15,7 @@ from urllib.parse import quote, urlencode
 
 import requests
 
+from app_info import APP_TITLE, APP_VERSION
 from buzz_ingest import run_b2_1_ingest
 from engagement_correlation import run_b2_2_correlation
 from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section, render_collection_tables_html
@@ -27,8 +28,6 @@ except ImportError:  # pragma: no cover
     ZoneInfo = None
 
 DEFAULT_TIMEOUT = 30
-APP_VERSION = "10.1.1"
-APP_TITLE = f"CivitAI Tracker v{APP_VERSION}"
 DEFAULT_VIEW_HOST = "https://civitai.red"
 DEFAULT_API_MODE = "red"
 DEFAULT_NSFW_LEVEL = "X"

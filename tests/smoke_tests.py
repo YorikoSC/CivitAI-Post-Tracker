@@ -33,6 +33,40 @@ from tracker_service import (
     render_dashboard,
     write_dashboard_html,
 )
+from update_manager import ReleaseAsset, UpdateInfo, choose_download_asset, is_newer_version, safe_filename, version_key
+
+
+class UpdateManagerSmokeTests(unittest.TestCase):
+    def test_version_tags_are_compared_numerically(self) -> None:
+        self.assertEqual(version_key("TrackerV10.1.1"), (10, 1, 1, 0))
+        self.assertTrue(is_newer_version("TrackerV10.2", "10.1.9"))
+        self.assertFalse(is_newer_version("V10.1.1", "10.1.1"))
+        self.assertFalse(is_newer_version("v10.1.9", "10.2.0"))
+
+    def test_choose_download_asset_prefers_portable_zip(self) -> None:
+        info = UpdateInfo(
+            current_version="10.1.1",
+            latest_version="TrackerV10.2",
+            latest_tag="TrackerV10.2",
+            release_name="Tracker v10.2",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=False,
+            update_available=True,
+            assets=(
+                ReleaseAsset("source.zip", "https://example.test/source.zip", 10),
+                ReleaseAsset("CivitAITracker-v10.2-win64.zip", "https://example.test/app.zip", 100),
+            ),
+        )
+
+        selected = choose_download_asset(info, "frozen")
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.name, "CivitAITracker-v10.2-win64.zip")
+
+    def test_download_filename_is_sanitized(self) -> None:
+        self.assertEqual(safe_filename("../CivitAITracker:v10.2?.zip"), "CivitAITracker_v10.2_.zip")
 
 
 class CollectionParserSmokeTests(unittest.TestCase):
@@ -98,6 +132,11 @@ class CollectionConfigSmokeTests(unittest.TestCase):
         self.assertFalse(modern["options"]["enable_buzz_ingest"])
         self.assertFalse(legacy["options"]["enable_collection_tracking"])
         self.assertFalse(legacy["options"]["enable_buzz_ingest"])
+
+    def test_update_check_on_launch_defaults_to_enabled(self) -> None:
+        cfg = normalize_config({})
+
+        self.assertTrue(cfg["options"]["check_updates_on_launch"])
 
 
 class CollectionStateSmokeTests(unittest.TestCase):
