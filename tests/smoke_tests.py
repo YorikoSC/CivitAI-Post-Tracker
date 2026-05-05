@@ -33,7 +33,16 @@ from tracker_service import (
     render_dashboard,
     write_dashboard_html,
 )
-from update_manager import ReleaseAsset, UpdateInfo, choose_download_asset, is_newer_version, safe_filename, version_key
+from update_manager import (
+    RUNTIME_PRESERVE_NAMES,
+    ReleaseAsset,
+    UpdateInfo,
+    build_update_applier_script,
+    choose_download_asset,
+    is_newer_version,
+    safe_filename,
+    version_key,
+)
 
 
 class UpdateManagerSmokeTests(unittest.TestCase):
@@ -67,6 +76,16 @@ class UpdateManagerSmokeTests(unittest.TestCase):
 
     def test_download_filename_is_sanitized(self) -> None:
         self.assertEqual(safe_filename("../CivitAITracker:v10.2?.zip"), "CivitAITracker_v10.2_.zip")
+
+    def test_update_applier_preserves_runtime_data(self) -> None:
+        script = build_update_applier_script()
+
+        self.assertIn("Expand-Archive", script)
+        self.assertIn("backup-", script)
+        self.assertIn("CivitAITracker.exe", script)
+        for name in ("config.json", "api_key.txt", "civitai_tracker.db", "csv", "logs", "updates"):
+            self.assertIn(name, RUNTIME_PRESERVE_NAMES)
+            self.assertIn(name, script)
 
 
 class CollectionParserSmokeTests(unittest.TestCase):

@@ -26,10 +26,13 @@ The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.
 2. Wait for the GitHub release check.
 3. If an update is available, open the release page or download the attached ZIP package.
 4. The downloaded package is saved to `updates/`.
+5. In EXE mode, choose **Apply downloaded update** to close the app, back up replaced app files, apply the package, and restart.
 
 The app can also check for updates in the background on launch. This can be changed in **Settings**.
 
-The Update Center does not replace files while the app is running. It is the safe first step before a full automatic updater.
+The update applier preserves local runtime data such as `config.json`, `api_key.txt`, `civitai_tracker.db`, `csv/`, `logs/`, `dashboard.html`, and `runtime_status.json`.
+
+Automatic apply is intentionally limited to the packaged EXE build. Source-mode users should update through Git.
 
 ## Release Packages
 
@@ -57,6 +60,20 @@ Attach that ZIP to the GitHub Release so the app can find and download it.
 6. Open Diagnostics.
 7. Run now.
 8. Open the dashboard and confirm the generated timestamp changed.
+
+## Update Backups
+
+Automatic updates store replaced app files under:
+
+```text
+updates\backup-<timestamp>\
+```
+
+The updater writes its log to:
+
+```text
+updates\update_apply.log
+```
 
 ## Database Migrations
 

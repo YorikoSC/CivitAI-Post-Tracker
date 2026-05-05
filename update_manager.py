@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import re
 import shutil
+import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -15,6 +17,18 @@ from app_info import APP_NAME, APP_VERSION, GITHUB_RELEASES_API, GITHUB_REPO
 CHUNK_SIZE = 1024 * 256
 VERSION_PATTERN = re.compile(r"(\d+(?:\.\d+){0,3})")
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")
+RUNTIME_PRESERVE_NAMES = (
+    "config.json",
+    "api_key.txt",
+    "civitai_tracker.db",
+    "csv",
+    "logs",
+    "dashboard.html",
+    "runtime_status.json",
+    ".civitai_tracker.lock",
+    "updates",
+    "release",
+)
 
 
 @dataclass(frozen=True)
@@ -213,3 +227,177 @@ def download_asset(
 def release_asset_names(assets: Iterable[ReleaseAsset]) -> list[str]:
     return [asset.name for asset in assets]
 
+
+def build_update_applier_script() -> str:
+    preserve_items = ", ".join(f"'{name}'" for name in RUNTIME_PRESERVE_NAMES)
+    return f"""param(
+    [Parameter(Mandatory=$true)][string]$PackagePath,
+    [Parameter(Mandatory=$true)][string]$AppDir,
+    [Parameter(Mandatory=$true)][int]$PidToWait,
+    [Parameter(Mandatory=$true)][string]$RestartPath,
+    [Parameter(Mandatory=$true)][string]$LogPath
+)
+
+$ErrorActionPreference = 'Stop'
+$preserve = @({preserve_items})
+
+function Write-UpdateLog([string]$Message) {{
+    $stamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $line = "[$stamp] $Message"
+    $logDir = Split-Path -Parent $LogPath
+    if ($logDir -and -not (Test-Path -LiteralPath $logDir)) {{
+        New-Item -ItemType Directory -Force -Path $logDir | Out-Null
+    }}
+    Add-Content -LiteralPath $LogPath -Value $line -Encoding UTF8
+}}
+
+function Copy-UpdateItem([string]$SourcePath, [string]$TargetPath) {{
+    Copy-Item -LiteralPath $SourcePath -Destination $TargetPath -Recurse -Force
+}}
+
+Write-UpdateLog "Updater started."
+$AppDir = (Resolve-Path -LiteralPath $AppDir).Path
+$PackagePath = (Resolve-Path -LiteralPath $PackagePath).Path
+
+if ($PidToWait -gt 0) {{
+    Write-UpdateLog "Waiting for app process $PidToWait to exit."
+    for ($i = 0; $i -lt 120; $i++) {{
+        $proc = Get-Process -Id $PidToWait -ErrorAction SilentlyContinue
+        if (-not $proc) {{
+            break
+        }}
+        Start-Sleep -Milliseconds 500
+    }}
+    if (Get-Process -Id $PidToWait -ErrorAction SilentlyContinue) {{
+        throw "The app did not close in time."
+    }}
+}}
+
+$updatesDir = Join-Path $AppDir 'updates'
+if (-not (Test-Path -LiteralPath $updatesDir)) {{
+    New-Item -ItemType Directory -Force -Path $updatesDir | Out-Null
+}}
+
+$stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
+$extractDir = Join-Path $updatesDir "extract-$stamp"
+$backupDir = Join-Path $updatesDir "backup-$stamp"
+New-Item -ItemType Directory -Force -Path $extractDir | Out-Null
+New-Item -ItemType Directory -Force -Path $backupDir | Out-Null
+
+Write-UpdateLog "Extracting package $PackagePath."
+Expand-Archive -LiteralPath $PackagePath -DestinationPath $extractDir -Force
+
+$payloadRoot = $null
+$exeCandidates = @(Get-ChildItem -LiteralPath $extractDir -Recurse -File -Filter 'CivitAITracker.exe')
+foreach ($candidate in $exeCandidates) {{
+    $candidateRoot = Split-Path -Parent $candidate.FullName
+    if (Test-Path -LiteralPath (Join-Path $candidateRoot '_internal')) {{
+        $payloadRoot = $candidateRoot
+        break
+    }}
+}}
+if (-not $payloadRoot) {{
+    $children = @(Get-ChildItem -LiteralPath $extractDir -Force)
+    if ($children.Count -eq 1 -and $children[0].PSIsContainer) {{
+        $payloadRoot = $children[0].FullName
+    }}
+}}
+if (-not $payloadRoot) {{
+    throw "Could not find the application files in the update package."
+}}
+Write-UpdateLog "Payload root: $payloadRoot"
+
+$moved = @()
+$appliedTargets = @()
+try {{
+    foreach ($item in Get-ChildItem -LiteralPath $payloadRoot -Force) {{
+        if ($preserve -contains $item.Name) {{
+            Write-UpdateLog "Preserving runtime item $($item.Name)."
+            continue
+        }}
+        $target = Join-Path $AppDir $item.Name
+        $backupTarget = Join-Path $backupDir $item.Name
+        if (Test-Path -LiteralPath $target) {{
+            $backupParent = Split-Path -Parent $backupTarget
+            if ($backupParent -and -not (Test-Path -LiteralPath $backupParent)) {{
+                New-Item -ItemType Directory -Force -Path $backupParent | Out-Null
+            }}
+            Move-Item -LiteralPath $target -Destination $backupTarget -Force
+            $moved += [pscustomobject]@{{ Target = $target; Backup = $backupTarget }}
+        }}
+        $appliedTargets += $target
+        Copy-UpdateItem -SourcePath $item.FullName -TargetPath $target
+        Write-UpdateLog "Updated $($item.Name)."
+    }}
+}} catch {{
+    Write-UpdateLog "Update failed: $($_.Exception.Message)"
+    foreach ($target in $appliedTargets) {{
+        if (Test-Path -LiteralPath $target) {{
+            Remove-Item -LiteralPath $target -Recurse -Force -ErrorAction SilentlyContinue
+        }}
+    }}
+    for ($i = $moved.Count - 1; $i -ge 0; $i--) {{
+        $entry = $moved[$i]
+        if (Test-Path -LiteralPath $entry.Backup) {{
+            Move-Item -LiteralPath $entry.Backup -Destination $entry.Target -Force
+        }}
+    }}
+    throw
+}}
+
+Write-UpdateLog "Update applied successfully. Backup: $backupDir"
+if (Test-Path -LiteralPath $RestartPath) {{
+    Write-UpdateLog "Restarting app."
+    Start-Process -FilePath $RestartPath -WorkingDirectory $AppDir
+}}
+"""
+
+
+def write_update_applier_script(updates_dir: Path) -> Path:
+    updates_dir.mkdir(parents=True, exist_ok=True)
+    script_path = updates_dir / "apply_update.ps1"
+    script_path.write_text(build_update_applier_script(), encoding="utf-8")
+    return script_path
+
+
+def launch_update_applier(
+    *,
+    package_path: Path,
+    app_dir: Path,
+    restart_path: Path,
+    pid_to_wait: int,
+) -> Path:
+    if not sys.platform.startswith("win"):
+        raise UpdateError("Automatic update apply is currently available on Windows only.")
+    if not package_path.exists():
+        raise UpdateError(f"Update package was not found: {package_path}")
+    if not app_dir.exists():
+        raise UpdateError(f"App folder was not found: {app_dir}")
+
+    updates_dir = app_dir / "updates"
+    script_path = write_update_applier_script(updates_dir)
+    log_path = updates_dir / "update_apply.log"
+    command = [
+        "powershell.exe",
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        str(script_path),
+        "-PackagePath",
+        str(package_path),
+        "-AppDir",
+        str(app_dir),
+        "-PidToWait",
+        str(pid_to_wait),
+        "-RestartPath",
+        str(restart_path),
+        "-LogPath",
+        str(log_path),
+    ]
+    creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.Popen(command, cwd=str(app_dir), creationflags=creationflags, close_fds=True)
+    except OSError as exc:
+        raise UpdateError(f"Could not start the update applier: {exc}") from exc
+    return log_path

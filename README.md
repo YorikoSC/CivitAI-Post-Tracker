@@ -108,9 +108,9 @@ On first launch, open **Settings**, save your configuration, then use **Diagnost
 
 ## Updating
 
-Open **Updates** in the app to check the latest GitHub release and download an attached portable ZIP package.
+Open **Updates** in the app to check the latest GitHub release, download an attached portable ZIP package, and apply it from the EXE build.
 
-By default, the app also checks for updates in the background on launch. The app is still updated as a portable folder replacement. Before replacing app files, close the app and back up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
+By default, the app also checks for updates in the background on launch. The update applier preserves runtime data and creates a backup of replaced app files, but keeping your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` is still recommended.
 
 See `UPDATE_GUIDE.md` for the full update and rollback checklist.
 

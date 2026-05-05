@@ -5,6 +5,7 @@
 ### Added
 - Added an in-app Update Center that checks GitHub releases, compares the current version with the latest public release, opens release notes, and downloads attached ZIP update packages.
 - Added optional background update checks on app launch.
+- Added a Windows update applier that can close the EXE build, back up replaced app files, apply a downloaded release package, and restart the app while preserving local runtime data.
 - Added shared app metadata in `app_info.py` so app title, dashboard title, user agents, and update checks use the same version source.
 - Added `package_release.bat` to build the EXE and create a release ZIP asset for GitHub Releases.
 

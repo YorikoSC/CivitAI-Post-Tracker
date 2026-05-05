@@ -110,6 +110,7 @@ from update_manager import (
     download_asset,
     fetch_latest_release,
     format_bytes,
+    launch_update_applier,
 )
 
 
@@ -671,11 +672,13 @@ class UpdateDialog(tk.Toplevel):
         self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now)
         self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled")
         self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled")
+        self.apply_btn = ttk.Button(buttons, text="Apply downloaded update", command=self.apply_update, state="disabled")
         self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads)
         self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy)
         self.check_btn.pack(side="left")
         self.release_btn.pack(side="left", padx=(8, 0))
         self.download_btn.pack(side="left", padx=(8, 0))
+        self.apply_btn.pack(side="left", padx=(8, 0))
         self.downloads_btn.pack(side="left", padx=(8, 0))
         self.close_btn.pack(side="right")
 
@@ -703,7 +706,9 @@ class UpdateDialog(tk.Toplevel):
         self.check_btn.configure(state="disabled" if busy else "normal")
         self.release_btn.configure(state="disabled" if busy or self.info is None else "normal")
         can_download = bool(self.asset is not None and self.info is not None and self.info.update_available)
+        can_apply = bool(not busy and self.downloaded_path is not None and self.execution_mode == "frozen")
         self.download_btn.configure(state="disabled" if busy or not can_download else "normal")
+        self.apply_btn.configure(state="normal" if can_apply else "disabled")
 
     def check_now(self):
         if self.is_busy:
@@ -792,7 +797,7 @@ class UpdateDialog(tk.Toplevel):
         self.progress_text_var.set("Done")
         self.status_var.set("Package downloaded.")
         self._set_notes(
-            f"Downloaded:\n{target}\n\nClose {APP_NAME} before replacing app files. Keep your config, API key, database, CSV, logs, dashboard, and runtime status files."
+            f"Downloaded:\n{target}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
         )
         self._set_busy(False)
         messagebox.showinfo("Updates", "Update package downloaded.", parent=self)
@@ -801,6 +806,39 @@ class UpdateDialog(tk.Toplevel):
         self.status_var.set("Download failed.")
         self._set_notes(message)
         self._set_busy(False)
+
+    def apply_update(self):
+        if self.execution_mode != "frozen":
+            messagebox.showinfo("Updates", "Automatic apply is available in EXE mode only.", parent=self)
+            return
+        if self.downloaded_path is None or not self.downloaded_path.exists():
+            messagebox.showinfo("Updates", "Download an update package first.", parent=self)
+            return
+        confirmed = messagebox.askyesno(
+            "Apply update",
+            "The app will close, back up replaced app files, apply the downloaded package, and restart.\n\nContinue?",
+            parent=self,
+        )
+        if not confirmed:
+            return
+        try:
+            log_path = launch_update_applier(
+                package_path=self.downloaded_path,
+                app_dir=self.runtime_dir,
+                restart_path=Path(sys.executable),
+                pid_to_wait=os.getpid(),
+            )
+        except Exception as exc:
+            messagebox.showerror("Updates", str(exc), parent=self)
+            return
+
+        self.status_var.set("Applying update...")
+        self._set_notes(f"Updater started.\n\nLog:\n{log_path}\n\n{APP_NAME} will close now and restart after the update is applied.")
+        messagebox.showinfo("Updates", "Updater started. The app will close now.", parent=self)
+        master = self.master
+        self.destroy()
+        if hasattr(master, "exit_app"):
+            master.after(100, master.exit_app)
 
 
 class TrackerApp(tk.Tk):
