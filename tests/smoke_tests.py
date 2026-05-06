@@ -21,6 +21,7 @@ def smoke_path(stem: str, suffix: str) -> Path:
     return SMOKE_TMP / f"{stem}_{uuid.uuid4().hex}{suffix}"
 
 import buzz_ingest
+import update_manager
 from collection_runtime import compute_collection_mode, normalize_collection_tracking_config
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
 from config_utils import normalize_config
@@ -43,6 +44,8 @@ from update_manager import (
     UpdateInfo,
     build_update_applier_script,
     choose_download_asset,
+    download_asset,
+    extract_mirror_assets,
     is_newer_version,
     safe_filename,
     validate_portable_update_package,
@@ -98,8 +101,102 @@ class UpdateManagerSmokeTests(unittest.TestCase):
 
         self.assertIsNone(choose_download_asset(info, "frozen"))
 
+    def test_release_notes_can_provide_update_package_mirror(self) -> None:
+        mirrors = extract_mirror_assets(
+            "Update package mirror: https://downloads.example.test/CivitAITracker-v10.2.0.2-field-test-win64.zip",
+            "TrackerV10.2.0.2-field-test",
+        )
+
+        self.assertEqual(len(mirrors), 1)
+        self.assertEqual(mirrors[0].source, "mirror")
+        self.assertEqual(mirrors[0].name, "CivitAITracker-v10.2.0.2-field-test-win64.zip")
+        self.assertEqual(
+            mirrors[0].download_url,
+            "https://downloads.example.test/CivitAITracker-v10.2.0.2-field-test-win64.zip",
+        )
+
+    def test_choose_download_asset_prefers_release_note_mirror(self) -> None:
+        info = UpdateInfo(
+            current_version="10.2.0-dev",
+            latest_version="TrackerV10.2.0.2-field-test",
+            latest_tag="TrackerV10.2.0.2-field-test",
+            release_name="Tracker v10.2 field test",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=True,
+            update_available=True,
+            assets=(ReleaseAsset("CivitAITracker-v10.2.0.2-field-test-win64.zip", "https://github.test/app.zip", 100),),
+            mirror_assets=(
+                ReleaseAsset(
+                    "CivitAITracker-v10.2.0.2-field-test-win64-mirror.zip",
+                    "https://mirror.example.test/app.zip",
+                    source="mirror",
+                ),
+            ),
+        )
+
+        selected = choose_download_asset(info, "frozen")
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.source, "mirror")
+        self.assertEqual(selected.download_url, "https://mirror.example.test/app.zip")
+
     def test_download_filename_is_sanitized(self) -> None:
         self.assertEqual(safe_filename("../CivitAITracker:v10.2?.zip"), "CivitAITracker_v10.2_.zip")
+
+    def test_download_asset_retries_reset_connection(self) -> None:
+        target_dir = smoke_path("download_retry", "")
+        calls = {"count": 0}
+
+        class ResetResponse:
+            headers = {"Content-Length": "4"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size: int = -1) -> bytes:
+                raise ConnectionResetError(10054, "connection reset")
+
+        class GoodResponse:
+            headers = {"Content-Length": "4"}
+
+            def __init__(self):
+                self._chunks = [b"data", b""]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size: int = -1) -> bytes:
+                return self._chunks.pop(0)
+
+        original_urlopen = update_manager.urlopen
+
+        def fake_urlopen(request, timeout: int):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return ResetResponse()
+            return GoodResponse()
+
+        try:
+            update_manager.urlopen = fake_urlopen
+            target = download_asset(
+                ReleaseAsset("CivitAITracker-v10.2-win64.zip", "https://example.test/app.zip", 4),
+                target_dir,
+                retry_attempts=2,
+                retry_delay_seconds=0,
+            )
+            self.assertEqual(target.read_bytes(), b"data")
+            self.assertEqual(calls["count"], 2)
+        finally:
+            update_manager.urlopen = original_urlopen
+            shutil.rmtree(target_dir, ignore_errors=True)
 
     def test_validate_portable_update_package_requires_exe_payload(self) -> None:
         good_package = smoke_path("portable_package", ".zip")

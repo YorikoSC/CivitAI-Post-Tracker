@@ -1,5 +1,5 @@
 APP_NAME = "CivitAI Tracker"
-APP_VERSION = "10.2.0-dev"
+APP_VERSION = "10.2.0.2-field-test"
 APP_TITLE = f"{APP_NAME} v{APP_VERSION}"
 
 GITHUB_REPO = "YorikoSC/CivitAI-Post-Tracker"

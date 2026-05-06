@@ -674,15 +674,18 @@ class UpdateDialog(tk.Toplevel):
         self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now)
         self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled")
         self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled")
+        self.select_btn = ttk.Button(buttons, text="Select ZIP", command=self.select_local_package)
         self.apply_btn = ttk.Button(buttons, text="Apply downloaded update", command=self.apply_update, state="disabled")
         self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads)
         self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy)
-        self.check_btn.pack(side="left")
-        self.release_btn.pack(side="left", padx=(8, 0))
-        self.download_btn.pack(side="left", padx=(8, 0))
-        self.apply_btn.pack(side="left", padx=(8, 0))
-        self.downloads_btn.pack(side="left", padx=(8, 0))
-        self.close_btn.pack(side="right")
+        buttons.columnconfigure(5, weight=1)
+        self.check_btn.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
+        self.release_btn.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=2)
+        self.download_btn.grid(row=0, column=2, sticky="w", padx=(0, 8), pady=2)
+        self.select_btn.grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
+        self.apply_btn.grid(row=1, column=0, columnspan=2, sticky="w", padx=(0, 8), pady=(6, 0))
+        self.downloads_btn.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(6, 0))
+        self.close_btn.grid(row=1, column=5, sticky="e", pady=(6, 0))
 
     def _set_notes(self, text: str):
         self.notes_text.configure(state="normal")
@@ -745,7 +748,9 @@ class UpdateDialog(tk.Toplevel):
         self.asset = choose_download_asset(info, self.execution_mode)
         self.latest_var.set(info.latest_tag or info.latest_version)
         if self.asset:
-            self.asset_var.set(f"{self.asset.name} ({format_bytes(self.asset.size)})")
+            source_label = "mirror" if self.asset.source == "mirror" else "GitHub asset"
+            size_label = f" ({format_bytes(self.asset.size)})" if self.asset.size else ""
+            self.asset_var.set(f"{self.asset.name}{size_label} / {source_label}")
         elif self.execution_mode == "frozen" and any(asset.name.lower().endswith(".zip") for asset in info.assets):
             self.asset_var.set("No compatible EXE ZIP attached")
         else:
@@ -758,6 +763,8 @@ class UpdateDialog(tk.Toplevel):
                 notes += "\n\nNo compatible portable EXE ZIP is attached to this release. Open the release page and update manually."
             else:
                 notes += "\n\nNo downloadable ZIP package is attached to this release. Open the release page and update manually."
+        if self.asset is not None and self.asset.source == "mirror":
+            notes += "\n\nThis release provides a mirror package link. The app will use it because GitHub Release assets may be unavailable on some networks."
         if self.execution_mode != "frozen":
             notes += "\n\nSource mode is updated through Git. Automatic apply is available only in the packaged EXE build."
         self._set_notes(notes)
@@ -778,6 +785,19 @@ class UpdateDialog(tk.Toplevel):
         downloads_dir = self.runtime_dir / "updates"
         downloads_dir.mkdir(exist_ok=True)
         self.open_path(downloads_dir)
+
+    def select_local_package(self):
+        downloads_dir = self.runtime_dir / "updates"
+        downloads_dir.mkdir(exist_ok=True)
+        path = filedialog.askopenfilename(
+            title="Select update ZIP",
+            initialdir=str(downloads_dir),
+            filetypes=[("ZIP packages", "*.zip"), ("All files", "*.*")],
+            parent=self,
+        )
+        if not path:
+            return
+        self._use_update_package(Path(path), action="Selected")
 
     def download_update(self):
         if self.is_busy or self.asset is None:
@@ -808,34 +828,39 @@ class UpdateDialog(tk.Toplevel):
             self.progress_text_var.set(format_bytes(done))
 
     def _download_finished(self, target: Path):
+        self._use_update_package(target, action="Downloaded")
+        messagebox.showinfo("Updates", "Update package downloaded.", parent=self)
+
+    def _use_update_package(self, target: Path, *, action: str):
         self.downloaded_path = target
         self.downloaded_package_ready = False
         self.progress_var.set(100)
-        self.progress_text_var.set("Done")
-        self.status_var.set("Package downloaded.")
+        self.progress_text_var.set("Ready")
+        self.status_var.set(f"Package {action.lower()}.")
         if self.execution_mode == "frozen":
             try:
                 payload_root = validate_portable_update_package(target)
                 self.downloaded_package_ready = True
                 self._set_notes(
-                    f"Downloaded:\n{target}\n\nPackage check passed. Payload root: {payload_root}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
+                    f"{action}:\n{target}\n\nPackage check passed. Payload root: {payload_root}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
                 )
             except Exception as exc:
-                self.status_var.set("Package downloaded but cannot be applied automatically.")
+                self.status_var.set(f"Package {action.lower()} but cannot be applied automatically.")
                 self._set_notes(
-                    f"Downloaded:\n{target}\n\nThis ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually."
+                    f"{action}:\n{target}\n\nThis ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually."
                 )
         else:
             self._set_notes(
-                f"Downloaded:\n{target}\n\nSource mode is updated through Git. Use downloaded packages only for EXE/manual inspection."
+                f"{action}:\n{target}\n\nSource mode is updated through Git. Use downloaded packages only for EXE/manual inspection."
             )
         self._set_busy(False)
-        messagebox.showinfo("Updates", "Update package downloaded.", parent=self)
 
     def _download_failed(self, message: str):
         self.status_var.set("Download failed.")
         self.downloaded_package_ready = False
-        self._set_notes(message)
+        self._set_notes(
+            f"{message}\n\nIf GitHub keeps interrupting the connection, use Open release to download the ZIP in your browser, then choose Select ZIP here."
+        )
         self._set_busy(False)
 
     def apply_update(self):

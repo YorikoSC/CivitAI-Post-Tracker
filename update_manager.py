@@ -5,11 +5,13 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
 from urllib.error import HTTPError, URLError
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 
 from app_info import APP_NAME, APP_VERSION, GITHUB_RELEASES_API, GITHUB_REPO
@@ -18,6 +20,12 @@ from app_info import APP_NAME, APP_VERSION, GITHUB_RELEASES_API, GITHUB_REPO
 CHUNK_SIZE = 1024 * 256
 VERSION_PATTERN = re.compile(r"(\d+(?:\.\d+){0,3})")
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")
+URL_PATTERN = re.compile(r"https?://[^\s<>)\"']+", re.IGNORECASE)
+MARKDOWN_LINK_PATTERN = re.compile(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", re.IGNORECASE)
+MIRROR_LABEL_PATTERN = re.compile(
+    r"^\s*(?:[-*]\s*)?(?:update package mirror|portable package mirror|package mirror|download mirror|mirror)\s*:\s*(.+)$",
+    re.IGNORECASE,
+)
 APP_PACKAGE_TOKENS = ("civitaitracker", "civitai-tracker")
 PORTABLE_PACKAGE_TOKENS = ("win", "windows", "exe", "onedir", "portable")
 RUNTIME_PRESERVE_NAMES = (
@@ -40,6 +48,7 @@ class ReleaseAsset:
     download_url: str
     size: int = 0
     content_type: str = ""
+    source: str = "github"
 
 
 @dataclass(frozen=True)
@@ -54,6 +63,7 @@ class UpdateInfo:
     prerelease: bool
     update_available: bool
     assets: tuple[ReleaseAsset, ...]
+    mirror_assets: tuple[ReleaseAsset, ...] = ()
     zipball_url: str = ""
 
 
@@ -95,10 +105,50 @@ def _request_json(url: str, timeout_seconds: int) -> object:
         raise UpdateError("GitHub returned an unreadable response.") from exc
 
 
+def _mirror_filename_from_url(url: str) -> str:
+    parsed = urlparse(url)
+    candidate = unquote(Path(parsed.path).name)
+    if candidate.lower().endswith(".zip"):
+        return safe_filename(candidate)
+    return ""
+
+
+def _mirror_fallback_name(latest_version: str, index: int) -> str:
+    version = safe_filename(str(latest_version or APP_VERSION), fallback=APP_VERSION)
+    suffix = f"-{index}" if index > 1 else ""
+    return f"CivitAITracker-v{version}-win64-mirror{suffix}.zip"
+
+
+def extract_mirror_assets(release_notes: str, latest_version: str) -> tuple[ReleaseAsset, ...]:
+    assets: list[ReleaseAsset] = []
+    for line in (release_notes or "").splitlines():
+        label_match = MIRROR_LABEL_PATTERN.match(line)
+        if not label_match:
+            continue
+        value = label_match.group(1).strip()
+        markdown_match = MARKDOWN_LINK_PATTERN.search(value)
+        if markdown_match:
+            label = markdown_match.group(1).strip()
+            url = markdown_match.group(2).strip()
+        else:
+            url_match = URL_PATTERN.search(value)
+            if not url_match:
+                continue
+            label = ""
+            url = url_match.group(0).rstrip(".,;")
+
+        name = safe_filename(label) if label.lower().endswith(".zip") else _mirror_filename_from_url(url)
+        if not name:
+            name = _mirror_fallback_name(latest_version, len(assets) + 1)
+        assets.append(ReleaseAsset(name=name, download_url=url, source="mirror"))
+    return tuple(assets)
+
+
 def _release_to_update_info(payload: dict, current_version: str) -> UpdateInfo:
     tag = str(payload.get("tag_name") or "")
     release_name = str(payload.get("name") or tag or "Latest release")
     latest_version = tag or release_name
+    release_notes = str(payload.get("body") or "").strip()
     assets = tuple(
         ReleaseAsset(
             name=str(asset.get("name") or ""),
@@ -115,11 +165,12 @@ def _release_to_update_info(payload: dict, current_version: str) -> UpdateInfo:
         latest_tag=tag,
         release_name=release_name,
         release_url=str(payload.get("html_url") or f"https://github.com/{GITHUB_REPO}/releases"),
-        release_notes=str(payload.get("body") or "").strip(),
+        release_notes=release_notes,
         published_at=str(payload.get("published_at") or ""),
         prerelease=bool(payload.get("prerelease")),
         update_available=is_newer_version(latest_version, current_version),
         assets=assets,
+        mirror_assets=extract_mirror_assets(release_notes, latest_version),
         zipball_url=str(payload.get("zipball_url") or ""),
     )
 
@@ -160,7 +211,7 @@ def is_portable_release_asset(asset: ReleaseAsset) -> bool:
 
 
 def choose_download_asset(info: UpdateInfo, execution_mode: str) -> ReleaseAsset | None:
-    zip_assets = [asset for asset in info.assets if asset.name.lower().endswith(".zip")]
+    zip_assets = [asset for asset in (*info.mirror_assets, *info.assets) if asset.name.lower().endswith(".zip")]
     if not zip_assets:
         return None
 
@@ -173,11 +224,12 @@ def choose_download_asset(info: UpdateInfo, execution_mode: str) -> ReleaseAsset
     else:
         preferred_tokens = [*APP_PACKAGE_TOKENS, "source", "src"]
 
-    def score(asset: ReleaseAsset) -> tuple[int, int]:
+    def score(asset: ReleaseAsset) -> tuple[int, int, int]:
         compact_name = _compact_asset_name(asset.name)
+        source_score = 1 if asset.source == "mirror" else 0
         token_hits = sum(1 for token in preferred_tokens if token in compact_name)
         size_score = min(asset.size, 2_000_000_000)
-        return (token_hits, size_score)
+        return (source_score, token_hits, size_score)
 
     return max(zip_assets, key=score)
 
@@ -201,45 +253,67 @@ def download_asset(
     destination_dir: Path,
     *,
     timeout_seconds: int = 60,
+    retry_attempts: int = 3,
+    retry_delay_seconds: float = 1.5,
     progress: Callable[[int, int], None] | None = None,
 ) -> Path:
     destination_dir.mkdir(parents=True, exist_ok=True)
     target = destination_dir / safe_filename(asset.name)
     temp_target = target.with_suffix(target.suffix + ".part")
-    request = Request(
-        asset.download_url,
-        headers={"User-Agent": f"{APP_NAME.replace(' ', '-')}-updater/{APP_VERSION}"},
-    )
+    attempts = max(1, retry_attempts)
+    last_message = "Download failed."
+    last_error: BaseException | None = None
 
-    try:
-        with urlopen(request, timeout=timeout_seconds) as response:
-            total = int(response.headers.get("Content-Length") or asset.size or 0)
-            downloaded = 0
-            with temp_target.open("wb") as output:
-                while True:
-                    chunk = response.read(CHUNK_SIZE)
-                    if not chunk:
-                        break
-                    output.write(chunk)
-                    downloaded += len(chunk)
-                    if progress:
-                        progress(downloaded, total)
-        shutil.move(str(temp_target), str(target))
-        if progress:
-            progress(target.stat().st_size, target.stat().st_size)
-        return target
-    except HTTPError as exc:
-        raise UpdateError(f"Download failed with HTTP {exc.code}.") from exc
-    except URLError as exc:
-        reason = getattr(exc, "reason", exc)
-        raise UpdateError(f"Download failed: {reason}") from exc
-    except TimeoutError as exc:
-        raise UpdateError("Download did not finish before the timeout.") from exc
-    finally:
+    for attempt in range(1, attempts + 1):
+        request = Request(
+            asset.download_url,
+            headers={"User-Agent": f"{APP_NAME.replace(' ', '-')}-updater/{APP_VERSION}"},
+        )
+        try:
+            temp_target.unlink(missing_ok=True)
+            with urlopen(request, timeout=timeout_seconds) as response:
+                total = int(response.headers.get("Content-Length") or asset.size or 0)
+                downloaded = 0
+                with temp_target.open("wb") as output:
+                    while True:
+                        chunk = response.read(CHUNK_SIZE)
+                        if not chunk:
+                            break
+                        output.write(chunk)
+                        downloaded += len(chunk)
+                        if progress:
+                            progress(downloaded, total)
+                if total > 0 and downloaded < total:
+                    raise UpdateError(f"Download stopped early: {format_bytes(downloaded)} of {format_bytes(total)}.")
+            shutil.move(str(temp_target), str(target))
+            if progress:
+                progress(target.stat().st_size, target.stat().st_size)
+            return target
+        except HTTPError as exc:
+            last_message = f"Download failed with HTTP {exc.code}."
+            last_error = exc
+        except URLError as exc:
+            reason = getattr(exc, "reason", exc)
+            last_message = f"Download failed: {reason}"
+            last_error = exc
+        except TimeoutError as exc:
+            last_message = "Download did not finish before the timeout."
+            last_error = exc
+        except OSError as exc:
+            last_message = f"Download failed: {exc}"
+            last_error = exc
+        except UpdateError as exc:
+            last_message = str(exc)
+            last_error = exc
+
         try:
             temp_target.unlink(missing_ok=True)
         except OSError:
             pass
+        if attempt < attempts:
+            time.sleep(max(0, retry_delay_seconds) * attempt)
+
+    raise UpdateError(f"{last_message} Tried {attempts} times.") from last_error
 
 
 def release_asset_names(assets: Iterable[ReleaseAsset]) -> list[str]:

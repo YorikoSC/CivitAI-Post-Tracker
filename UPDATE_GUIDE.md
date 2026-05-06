@@ -28,6 +28,16 @@ The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.
 4. The downloaded package is saved to `updates/`.
 5. In EXE mode, choose **Apply downloaded update** to close the app, back up replaced app files, apply the package, and restart.
 
+If the in-app download fails because the connection is interrupted, choose **Open release**, download the ZIP in your browser, then choose **Select ZIP** in the Updates dialog and apply it from there.
+
+If GitHub Release assets are unavailable on a network, upload the same portable ZIP to another storage provider and add this line to the GitHub Release notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v10.2.0.2-field-test-win64.zip
+```
+
+The Update Center prefers mirror package links over GitHub release assets.
+
 The app can also check for updates in the background on launch. This can be changed in **Settings**.
 
 The update applier preserves local runtime data such as `config.json`, `api_key.txt`, `civitai_tracker.db`, `csv/`, `logs/`, `dashboard.html`, and `runtime_status.json`.
