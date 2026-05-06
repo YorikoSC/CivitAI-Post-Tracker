@@ -187,6 +187,7 @@ class UpdateManagerSmokeTests(unittest.TestCase):
 
         self.assertIn("requests", requirements)
         self.assertIn("set \"PYTHON_EXE=%VENV_DIR%\\Scripts\\python.exe\"", build_script)
+        self.assertIn("from app_info import APP_TITLE", build_script)
         self.assertIn("-m venv", build_script)
         self.assertIn("-m pip install -r requirements.txt", build_script)
         self.assertIn("-m pip install --upgrade pyinstaller", build_script)

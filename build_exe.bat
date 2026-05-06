@@ -36,6 +36,10 @@ echo Using build Python:
 "%PYTHON_EXE%" -c "import sys; print(sys.executable)" || goto :fail
 
 echo.
+echo Building app version:
+"%PYTHON_EXE%" -c "from app_info import APP_TITLE; print(APP_TITLE)" || goto :fail
+
+echo.
 echo Installing project dependencies into .venv...
 "%PYTHON_EXE%" -m pip install --upgrade pip setuptools wheel || goto :deps_fail
 "%PYTHON_EXE%" -m pip install -r requirements.txt || goto :deps_fail

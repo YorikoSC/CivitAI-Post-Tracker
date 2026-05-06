@@ -951,10 +951,12 @@ class TrackerApp(tk.Tk):
         self.last_error_var = tk.StringVar(value="-")
         self.polling_var = tk.StringVar(value="Off")
         self.interval_var = tk.StringVar(value="15 minutes")
+        self.version_var = tk.StringVar(value=f"v{APP_VERSION} / {get_execution_mode()}")
         self.status_dot = tk.Label(grid, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=("Segoe UI", 12, "bold"))
 
         rows = [
             ("Status", self.status_var, True),
+            ("App version", self.version_var, False),
             ("Last successful run", self.last_success_var, False),
             ("Next scheduled run", self.next_run_var, False),
             ("Auto polling", self.polling_var, False),
@@ -1026,8 +1028,10 @@ class TrackerApp(tk.Tk):
     def _build_footer(self, shell):
         footer = tk.Frame(shell, bg="#0c0f13", padx=16, pady=10)
         footer.pack(fill="x")
+        footer.grid_columnconfigure(0, weight=1)
         self.status_line_var = tk.StringVar(value="Ready.")
-        tk.Label(footer, textvariable=self.status_line_var, bg="#0c0f13", fg=SUBTEXT_FG, anchor="w").pack(fill="x")
+        tk.Label(footer, textvariable=self.status_line_var, bg="#0c0f13", fg=SUBTEXT_FG, anchor="w").grid(row=0, column=0, sticky="ew")
+        tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg="#0c0f13", fg=SUBTEXT_FG, anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _enqueue_log(self, message: str):
         self.log_queue.put(message)
@@ -1311,6 +1315,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description="CivitAI Tracker desktop app")
     parser.add_argument("--minimized", action="store_true", help="Start minimized to tray")
     parser.add_argument("--setup", action="store_true", help="Open settings immediately")
+    parser.add_argument("--version", action="store_true", help="Show app version and exit")
     parser.add_argument("--hide-console", action="store_true", help=argparse.SUPPRESS)
     return parser
 
@@ -1328,6 +1333,9 @@ def hide_console_window():
 
 def main():
     args = build_parser().parse_args()
+    if args.version:
+        print(APP_TITLE)
+        return 0
     if args.hide_console:
         hide_console_window()
     runtime_dir = get_runtime_data_dir(__file__)
