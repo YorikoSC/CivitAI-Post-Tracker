@@ -1,5 +1,11 @@
 # Changelog
 
+## v10.2.1
+
+### Fixed
+- Fresh posts now appear in Dashboard Performance quick filters immediately after their first captured snapshot.
+- Period filters now consider a post's publish date as well as reaction/comment/collection gains, so first-seen posts are not hidden from Day, Week, Month, or Year views.
+
 ## v10.2.0
 
 ### Added

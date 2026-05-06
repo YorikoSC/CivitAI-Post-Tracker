@@ -1278,12 +1278,18 @@ def build_post_performance_rows(
         reaction_total = safe_int(row["reaction_total"])
         comment_count = safe_int(row["comment_count"])
         published_dt = tz_helper.parse_iso(row["published_at"])
+        published_local = published_dt.astimezone(tz_helper.tz) if published_dt is not None else None
         published_sort = published_dt.timestamp() if published_dt is not None else 0.0
         reactions_per_day: Optional[float] = None
-        if reaction_total is not None and published_dt is not None:
-            age_days = (now_local - published_dt.astimezone(tz_helper.tz)).total_seconds() / 86400
+        if reaction_total is not None and published_local is not None:
+            age_days = (now_local - published_local).total_seconds() / 86400
             if age_days > 0:
                 reactions_per_day = reaction_total / max(age_days, 1 / 24)
+
+        published_today = bool(published_local is not None and published_local.date() == today_date)
+        published_week = bool(published_local is not None and published_local >= week_cutoff)
+        published_month = bool(published_local is not None and published_local >= month_cutoff)
+        published_year = bool(published_local is not None and published_local >= year_cutoff)
 
         first2_reactions = None
         first24_reactions = None
@@ -1314,6 +1320,30 @@ def build_post_performance_rows(
                 "collections_week": int(collections_week.get(post_id, 0)),
                 "collections_month": int(collections_month.get(post_id, 0)),
                 "collections_year": int(collections_year.get(post_id, 0)),
+                "period_day": bool(
+                    published_today
+                    or reaction_today.get(post_id, 0)
+                    or comments_today.get(post_id, 0)
+                    or collections_today.get(post_id, 0)
+                ),
+                "period_week": bool(
+                    published_week
+                    or reaction_week.get(post_id, 0)
+                    or comments_week.get(post_id, 0)
+                    or collections_week.get(post_id, 0)
+                ),
+                "period_month": bool(
+                    published_month
+                    or reaction_month.get(post_id, 0)
+                    or comments_month.get(post_id, 0)
+                    or collections_month.get(post_id, 0)
+                ),
+                "period_year": bool(
+                    published_year
+                    or reaction_year.get(post_id, 0)
+                    or comments_year.get(post_id, 0)
+                    or collections_year.get(post_id, 0)
+                ),
                 "image_count": len(images),
                 "images": images,
                 "primary_image_id": primary_image.get("image_id"),
@@ -2103,10 +2133,10 @@ def render_dashboard(
             week_html = f"{render_delta(week_reactions)}<div class='row-sub'>comments {html.escape(fmt_signed(week_comments))}</div>"
             collections_html = f"{collections_week}<div class='row-sub'>today {collections_today}</div>"
             period_flags = {
-                "day": bool(today_reactions or today_comments or collections_today),
-                "week": bool(week_reactions or week_comments or collections_week),
-                "month": bool(month_reactions or month_comments or collections_month),
-                "year": bool(year_reactions or year_comments or collections_year),
+                "day": bool(row.get("period_day")),
+                "week": bool(row.get("period_week")),
+                "month": bool(row.get("period_month")),
+                "year": bool(row.get("period_year")),
                 "all": True,
             }
             active_attr = " data-active-row='1'" if any(period_flags[key] for key in ("day", "week", "month", "year")) else ""

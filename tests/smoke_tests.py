@@ -672,6 +672,47 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertEqual(rows[0]["first2_reactions"], 5)
         self.assertEqual(rows[0]["first24_reactions"], 8)
         self.assertEqual(rows[0]["image_count"], 1)
+        self.assertTrue(rows[0]["period_day"])
+        self.assertTrue(rows[0]["period_week"])
+
+    def test_new_post_without_delta_still_matches_period_filters(self) -> None:
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        init_db(conn)
+
+        now = datetime.now(timezone.utc).replace(microsecond=0)
+        published_at = (now - timedelta(hours=1)).isoformat()
+
+        conn.execute(
+            """
+            INSERT INTO post_snapshots (
+                post_id, username, title, published_at, captured_at,
+                source_host, source_kind, stats_known,
+                like_count, heart_count, laugh_count, cry_count, comment_count,
+                reaction_total, engagement_total
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (1003, "tester", "Fresh post", published_at, now.isoformat(), "https://civitai.red", "test", 1, 1, 0, 0, 0, 0, 1, 1),
+        )
+        conn.commit()
+
+        tz_helper = TimezoneHelper("UTC")
+        rows = build_post_performance_rows(
+            conn,
+            get_current_posts(conn),
+            load_snapshots_by_post(conn),
+            load_post_deltas(conn),
+            tz_helper,
+        )
+        conn.close()
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["post_id"], 1003)
+        self.assertEqual(rows[0]["reaction_today"], 0)
+        self.assertTrue(rows[0]["period_day"])
+        self.assertTrue(rows[0]["period_week"])
+        self.assertTrue(rows[0]["period_month"])
+        self.assertTrue(rows[0]["period_year"])
 
     def test_image_enrichment_keeps_preview_urls(self) -> None:
         normalized = normalize_image(
