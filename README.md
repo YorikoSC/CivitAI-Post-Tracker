@@ -1,4 +1,4 @@
-# CivitAI Tracker v10.1.1
+# CivitAI Tracker v10.2.0
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
@@ -7,6 +7,8 @@ v10 adds **collection tracking**: the dashboard can now show which of your image
 v10.1 turns the dashboard into a monitoring workspace: post performance rows, lazy image previews, a post detail drawer, and filtered analytics tabs for performance, collections, timing, and history.
 
 v10.1.1 is a patch release focused on reliable source/EXE startup, no-console launching from Explorer, and one-instance-per-folder safety.
+
+v10.2 adds a built-in Update Center for checking GitHub releases, downloading portable packages, and applying EXE updates with backups.
 
 ## Features
 
@@ -19,6 +21,7 @@ v10.1.1 is a patch release focused on reliable source/EXE startup, no-console la
 - Suggested posting windows based on historical performance
 - HTML dashboard with runtime status
 - Auto polling with tray support
+- Update Center for GitHub release checks and portable package downloads
 - Source mode launcher via windowed Python launcher
 - Single running instance per app folder to protect the local config and database
 - EXE build flow via PyInstaller (`onedir`)
@@ -89,6 +92,8 @@ If the windowed launcher needs troubleshooting, `launch_tracker.bat` remains ava
 build_exe.bat
 ```
 
+The build script creates and uses the project-local `.venv`, installs `requirements.txt`, and runs PyInstaller from that same environment.
+
 2. Open:
 
 ```text
@@ -105,7 +110,21 @@ On first launch, open **Settings**, save your configuration, then use **Diagnost
 
 ## Updating
 
-The app is currently updated as a portable folder replacement. Before updating, close the app and back up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
+Open **Updates** in the app to check the latest GitHub release, download an attached portable ZIP package, and apply it from the EXE build.
+
+By default, the app also checks for updates in the background on launch. The update applier preserves runtime data and creates a backup of replaced app files, but keeping your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` is still recommended.
+
+EXE auto-apply accepts only portable packages that contain `CivitAITracker.exe` and the `_internal/` app folder. Use **Exit app** in the main window or **Exit** in the tray menu to fully close the tracker.
+
+If GitHub interrupts the in-app ZIP download, open the release page, download the ZIP in your browser, then use **Select ZIP** in the Updates dialog.
+
+If GitHub Release assets are unavailable on a network, add a mirror line to the GitHub Release notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
+```
+
+When a mirror is present, the EXE Update Center will prefer it over the GitHub release asset.
 
 See `UPDATE_GUIDE.md` for the full update and rollback checklist.
 
@@ -127,6 +146,7 @@ Important collection-related settings:
     "config_version": 2
   },
   "options": {
+    "check_updates_on_launch": true,
     "enable_collection_tracking": true
   },
   "collection_tracking": {

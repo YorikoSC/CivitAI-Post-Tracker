@@ -1,5 +1,23 @@
 # Changelog
 
+## v10.2.0
+
+### Added
+- Added an in-app Update Center that checks GitHub releases, compares the current version with the latest public release, opens release notes, and downloads attached ZIP update packages.
+- Added optional background update checks on app launch.
+- Added a Windows update applier that can close the EXE build, back up replaced app files, apply a downloaded release package, and restart the app while preserving local runtime data.
+- Added shared app metadata in `app_info.py` so app title, dashboard title, user agents, and update checks use the same version source.
+- Added `package_release.bat` to build the EXE and create a release ZIP asset for GitHub Releases.
+- Added an `Exit app` button to the main window for fully closing the tracker without using the tray menu.
+- Added a manual **Select ZIP** fallback in the Update Center for cases where GitHub interrupts the in-app package download.
+- Added release-note mirror support for portable update packages when GitHub Release assets are unavailable.
+
+### Changed
+- Updated documentation around portable updates to reflect the Update Center and release package flow.
+- Hardened Update Center package selection so EXE builds only auto-apply compatible portable ZIP packages.
+- Retried interrupted update package downloads before reporting a failure.
+- Prefer configured mirror package URLs over GitHub Release assets for EXE updates.
+
 ## v10.1.1
 
 ### Added

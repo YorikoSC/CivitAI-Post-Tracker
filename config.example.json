@@ -29,6 +29,7 @@
     "launch_with_windows": false,
     "start_minimized": false,
     "start_auto_polling_on_launch": false,
+    "check_updates_on_launch": true,
     "enable_buzz_ingest": true
   },
   "collection_tracking": {

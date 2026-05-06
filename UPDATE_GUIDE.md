@@ -4,7 +4,7 @@ This project is distributed as a local portable app. Runtime data lives next to 
 
 ## Before Updating
 
-1. Close `CivitAITracker.exe`.
+1. Close `CivitAITracker.exe` with **Exit app** or the tray **Exit** menu item.
 2. Confirm auto polling is stopped.
 3. Back up these local files and folders if they exist:
 
@@ -20,6 +20,48 @@ runtime_status.json
 
 The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.db`.
 
+## In-App Update Check
+
+1. Open **Updates** in the app.
+2. Wait for the GitHub release check.
+3. If an update is available, open the release page or download the attached ZIP package.
+4. The downloaded package is saved to `updates/`.
+5. In EXE mode, choose **Apply downloaded update** to close the app, back up replaced app files, apply the package, and restart.
+
+If the in-app download fails because the connection is interrupted, choose **Open release**, download the ZIP in your browser, then choose **Select ZIP** in the Updates dialog and apply it from there.
+
+If GitHub Release assets are unavailable on a network, upload the same portable ZIP to another storage provider and add this line to the GitHub Release notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
+```
+
+The Update Center prefers mirror package links over GitHub release assets.
+
+The app can also check for updates in the background on launch. This can be changed in **Settings**.
+
+The update applier preserves local runtime data such as `config.json`, `api_key.txt`, `civitai_tracker.db`, `csv/`, `logs/`, `dashboard.html`, and `runtime_status.json`.
+
+Automatic apply requires a portable EXE ZIP package containing `CivitAITracker.exe` and the `_internal/` app folder. Source ZIP files are rejected before the app closes.
+
+Automatic apply is intentionally limited to the packaged EXE build. Source-mode users should update through Git.
+
+## Release Packages
+
+Release ZIP packages should be built with:
+
+```powershell
+package_release.bat
+```
+
+The package is written to:
+
+```text
+release\CivitAITracker-v<version>-win64.zip
+```
+
+Attach that ZIP to the GitHub Release so the app can find and download it. The expected package name is similar to `CivitAITracker-v10.2.0-win64.zip`.
+
 ## Portable EXE Update
 
 1. Build or download the new `dist\CivitAITracker` folder.
@@ -30,6 +72,20 @@ The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.
 6. Open Diagnostics.
 7. Run now.
 8. Open the dashboard and confirm the generated timestamp changed.
+
+## Update Backups
+
+Automatic updates store replaced app files under:
+
+```text
+updates\backup-<timestamp>\
+```
+
+The updater writes its log to:
+
+```text
+updates\update_apply.log
+```
 
 ## Database Migrations
 

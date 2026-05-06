@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import sqlite3
+import shutil
+import subprocess
 import sys
 import unittest
 import uuid
+import zipfile
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -18,6 +21,7 @@ def smoke_path(stem: str, suffix: str) -> Path:
     return SMOKE_TMP / f"{stem}_{uuid.uuid4().hex}{suffix}"
 
 import buzz_ingest
+import update_manager
 from collection_runtime import compute_collection_mode, normalize_collection_tracking_config
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
 from config_utils import normalize_config
@@ -33,6 +37,299 @@ from tracker_service import (
     render_dashboard,
     write_dashboard_html,
 )
+from update_manager import (
+    RUNTIME_PRESERVE_NAMES,
+    ReleaseAsset,
+    UpdateError,
+    UpdateInfo,
+    build_update_applier_script,
+    choose_download_asset,
+    download_asset,
+    extract_mirror_assets,
+    is_newer_version,
+    safe_filename,
+    validate_portable_update_package,
+    version_key,
+)
+
+
+class UpdateManagerSmokeTests(unittest.TestCase):
+    def test_version_tags_are_compared_numerically(self) -> None:
+        self.assertEqual(version_key("TrackerV10.1.1"), (10, 1, 1, 0))
+        self.assertTrue(is_newer_version("TrackerV10.2", "10.1.9"))
+        self.assertFalse(is_newer_version("V10.1.1", "10.1.1"))
+        self.assertFalse(is_newer_version("v10.1.9", "10.2.0"))
+
+    def test_choose_download_asset_prefers_portable_zip(self) -> None:
+        info = UpdateInfo(
+            current_version="10.1.1",
+            latest_version="TrackerV10.2",
+            latest_tag="TrackerV10.2",
+            release_name="Tracker v10.2",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=False,
+            update_available=True,
+            assets=(
+                ReleaseAsset("source.zip", "https://example.test/source.zip", 10),
+                ReleaseAsset("CivitAITracker-v10.2-win64.zip", "https://example.test/app.zip", 100),
+            ),
+        )
+
+        selected = choose_download_asset(info, "frozen")
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.name, "CivitAITracker-v10.2-win64.zip")
+
+    def test_choose_download_asset_rejects_source_zip_for_frozen_build(self) -> None:
+        info = UpdateInfo(
+            current_version="10.1.1",
+            latest_version="TrackerV10.2",
+            latest_tag="TrackerV10.2",
+            release_name="Tracker v10.2",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=False,
+            update_available=True,
+            assets=(
+                ReleaseAsset("source.zip", "https://example.test/source.zip", 10),
+                ReleaseAsset("CivitAITracker-source.zip", "https://example.test/source2.zip", 20),
+            ),
+        )
+
+        self.assertIsNone(choose_download_asset(info, "frozen"))
+
+    def test_release_notes_can_provide_update_package_mirror(self) -> None:
+        mirrors = extract_mirror_assets(
+            "Update package mirror: https://downloads.example.test/CivitAITracker-v10.2.0-win64.zip",
+            "TrackerV10.2.0",
+        )
+
+        self.assertEqual(len(mirrors), 1)
+        self.assertEqual(mirrors[0].source, "mirror")
+        self.assertEqual(mirrors[0].name, "CivitAITracker-v10.2.0-win64.zip")
+        self.assertEqual(
+            mirrors[0].download_url,
+            "https://downloads.example.test/CivitAITracker-v10.2.0-win64.zip",
+        )
+
+    def test_choose_download_asset_prefers_release_note_mirror(self) -> None:
+        info = UpdateInfo(
+            current_version="10.1.1",
+            latest_version="TrackerV10.2.0",
+            latest_tag="TrackerV10.2.0",
+            release_name="Tracker v10.2",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=True,
+            update_available=True,
+            assets=(ReleaseAsset("CivitAITracker-v10.2.0-win64.zip", "https://github.test/app.zip", 100),),
+            mirror_assets=(
+                ReleaseAsset(
+                    "CivitAITracker-v10.2.0-win64-mirror.zip",
+                    "https://mirror.example.test/app.zip",
+                    source="mirror",
+                ),
+            ),
+        )
+
+        selected = choose_download_asset(info, "frozen")
+
+        self.assertIsNotNone(selected)
+        self.assertEqual(selected.source, "mirror")
+        self.assertEqual(selected.download_url, "https://mirror.example.test/app.zip")
+
+    def test_download_filename_is_sanitized(self) -> None:
+        self.assertEqual(safe_filename("../CivitAITracker:v10.2?.zip"), "CivitAITracker_v10.2_.zip")
+
+    def test_download_asset_retries_reset_connection(self) -> None:
+        target_dir = smoke_path("download_retry", "")
+        calls = {"count": 0}
+
+        class ResetResponse:
+            headers = {"Content-Length": "4"}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size: int = -1) -> bytes:
+                raise ConnectionResetError(10054, "connection reset")
+
+        class GoodResponse:
+            headers = {"Content-Length": "4"}
+
+            def __init__(self):
+                self._chunks = [b"data", b""]
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self, size: int = -1) -> bytes:
+                return self._chunks.pop(0)
+
+        original_urlopen = update_manager.urlopen
+
+        def fake_urlopen(request, timeout: int):
+            calls["count"] += 1
+            if calls["count"] == 1:
+                return ResetResponse()
+            return GoodResponse()
+
+        try:
+            update_manager.urlopen = fake_urlopen
+            target = download_asset(
+                ReleaseAsset("CivitAITracker-v10.2-win64.zip", "https://example.test/app.zip", 4),
+                target_dir,
+                retry_attempts=2,
+                retry_delay_seconds=0,
+            )
+            self.assertEqual(target.read_bytes(), b"data")
+            self.assertEqual(calls["count"], 2)
+        finally:
+            update_manager.urlopen = original_urlopen
+            shutil.rmtree(target_dir, ignore_errors=True)
+
+    def test_validate_portable_update_package_requires_exe_payload(self) -> None:
+        good_package = smoke_path("portable_package", ".zip")
+        bad_package = smoke_path("source_package", ".zip")
+        try:
+            with zipfile.ZipFile(good_package, "w") as package:
+                package.writestr("CivitAITracker/CivitAITracker.exe", "exe")
+                package.writestr("CivitAITracker/_internal/runtime.txt", "runtime")
+
+            with zipfile.ZipFile(bad_package, "w") as package:
+                package.writestr("README.md", "source archive")
+
+            self.assertEqual(validate_portable_update_package(good_package), "CivitAITracker")
+            with self.assertRaises(UpdateError):
+                validate_portable_update_package(bad_package)
+        finally:
+            good_package.unlink(missing_ok=True)
+            bad_package.unlink(missing_ok=True)
+
+    def test_update_applier_preserves_runtime_data(self) -> None:
+        script = build_update_applier_script()
+
+        self.assertIn("Expand-Archive", script)
+        self.assertIn("backup-", script)
+        self.assertIn("CivitAITracker.exe", script)
+        for name in ("config.json", "api_key.txt", "civitai_tracker.db", "csv", "logs", "updates"):
+            self.assertIn(name, RUNTIME_PRESERVE_NAMES)
+            self.assertIn(name, script)
+
+    def test_update_applier_replaces_app_files_and_keeps_runtime_files(self) -> None:
+        if not sys.platform.startswith("win") or shutil.which("powershell.exe") is None:
+            self.skipTest("Windows PowerShell is required for the update applier smoke test.")
+
+        root = smoke_path("update_apply", "")
+        app_dir = root / "app"
+        payload_parent = root / "payload"
+        payload_root = payload_parent / "CivitAITracker"
+        package_path = root / "CivitAITracker-update.zip"
+        log_path = app_dir / "updates" / "update_apply.log"
+        script_path = app_dir / "updates" / "apply_update.ps1"
+
+        try:
+            (app_dir / "_internal").mkdir(parents=True)
+            (app_dir / "csv").mkdir()
+            (app_dir / "logs").mkdir()
+            (app_dir / "updates").mkdir()
+            (app_dir / "CivitAITracker.exe").write_text("old exe", encoding="utf-8")
+            (app_dir / "_internal" / "old.txt").write_text("old internal", encoding="utf-8")
+            (app_dir / "README.md").write_text("old readme", encoding="utf-8")
+            (app_dir / "config.json").write_text("keep config", encoding="utf-8")
+            (app_dir / "api_key.txt").write_text("keep key", encoding="utf-8")
+            (app_dir / "civitai_tracker.db").write_text("keep db", encoding="utf-8")
+            (app_dir / "csv" / "snapshot.csv").write_text("keep csv", encoding="utf-8")
+            (app_dir / "logs" / "app.log").write_text("keep log", encoding="utf-8")
+            (app_dir / "dashboard.html").write_text("keep dashboard", encoding="utf-8")
+            (app_dir / "runtime_status.json").write_text("keep status", encoding="utf-8")
+
+            (payload_root / "_internal").mkdir(parents=True)
+            (payload_root / "CivitAITracker.exe").write_text("new exe", encoding="utf-8")
+            (payload_root / "_internal" / "new.txt").write_text("new internal", encoding="utf-8")
+            (payload_root / "README.md").write_text("new readme", encoding="utf-8")
+            (payload_root / "config.json").write_text("do not copy config", encoding="utf-8")
+
+            with zipfile.ZipFile(package_path, "w") as package:
+                for path in payload_parent.rglob("*"):
+                    if path.is_file():
+                        package.write(path, path.relative_to(payload_parent))
+
+            script_path.write_text(build_update_applier_script(), encoding="utf-8")
+            result = subprocess.run(
+                [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-ExecutionPolicy",
+                    "Bypass",
+                    "-File",
+                    str(script_path),
+                    "-PackagePath",
+                    str(package_path),
+                    "-AppDir",
+                    str(app_dir),
+                    "-PidToWait",
+                    "0",
+                    "-RestartPath",
+                    str(app_dir / "does-not-exist.exe"),
+                    "-LogPath",
+                    str(log_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=60,
+            )
+
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((app_dir / "CivitAITracker.exe").read_text(encoding="utf-8"), "new exe")
+            self.assertEqual((app_dir / "_internal" / "new.txt").read_text(encoding="utf-8"), "new internal")
+            self.assertFalse((app_dir / "_internal" / "old.txt").exists())
+            self.assertEqual((app_dir / "README.md").read_text(encoding="utf-8"), "new readme")
+            self.assertEqual((app_dir / "config.json").read_text(encoding="utf-8"), "keep config")
+            self.assertEqual((app_dir / "api_key.txt").read_text(encoding="utf-8"), "keep key")
+            self.assertEqual((app_dir / "civitai_tracker.db").read_text(encoding="utf-8"), "keep db")
+            self.assertEqual((app_dir / "csv" / "snapshot.csv").read_text(encoding="utf-8"), "keep csv")
+            self.assertEqual((app_dir / "logs" / "app.log").read_text(encoding="utf-8"), "keep log")
+            self.assertEqual((app_dir / "dashboard.html").read_text(encoding="utf-8"), "keep dashboard")
+            self.assertEqual((app_dir / "runtime_status.json").read_text(encoding="utf-8"), "keep status")
+
+            backups = list((app_dir / "updates").glob("backup-*"))
+            self.assertEqual(len(backups), 1)
+            backup_dir = backups[0]
+            self.assertEqual((backup_dir / "CivitAITracker.exe").read_text(encoding="utf-8"), "old exe")
+            self.assertEqual((backup_dir / "_internal" / "old.txt").read_text(encoding="utf-8"), "old internal")
+            self.assertEqual((backup_dir / "README.md").read_text(encoding="utf-8"), "old readme")
+            self.assertIn("Update applied successfully", log_path.read_text(encoding="utf-8"))
+        finally:
+            try:
+                shutil.rmtree(root, ignore_errors=True)
+            except OSError:
+                pass
+
+    def test_build_flow_installs_runtime_requirements_before_pyinstaller(self) -> None:
+        build_script = (ROOT / "build_exe.bat").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        spec = (ROOT / "civitai_tracker.spec").read_text(encoding="utf-8")
+
+        self.assertIn("requests", requirements)
+        self.assertIn("set \"PYTHON_EXE=%VENV_DIR%\\Scripts\\python.exe\"", build_script)
+        self.assertIn("from app_info import APP_TITLE", build_script)
+        self.assertIn("-m venv", build_script)
+        self.assertIn("-m pip install -r requirements.txt", build_script)
+        self.assertIn("-m pip install --upgrade pyinstaller", build_script)
+        self.assertIn("import requests", build_script)
+        self.assertIn("-m PyInstaller --noconfirm --clean civitai_tracker.spec", build_script)
+        self.assertIn("'requests'", spec)
 
 
 class CollectionParserSmokeTests(unittest.TestCase):
@@ -98,6 +395,11 @@ class CollectionConfigSmokeTests(unittest.TestCase):
         self.assertFalse(modern["options"]["enable_buzz_ingest"])
         self.assertFalse(legacy["options"]["enable_collection_tracking"])
         self.assertFalse(legacy["options"]["enable_buzz_ingest"])
+
+    def test_update_check_on_launch_defaults_to_enabled(self) -> None:
+        cfg = normalize_config({})
+
+        self.assertTrue(cfg["options"]["check_updates_on_launch"])
 
 
 class CollectionStateSmokeTests(unittest.TestCase):
