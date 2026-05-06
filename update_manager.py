@@ -5,6 +5,7 @@ import re
 import shutil
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Iterable
@@ -17,6 +18,8 @@ from app_info import APP_NAME, APP_VERSION, GITHUB_RELEASES_API, GITHUB_REPO
 CHUNK_SIZE = 1024 * 256
 VERSION_PATTERN = re.compile(r"(\d+(?:\.\d+){0,3})")
 SAFE_FILENAME_PATTERN = re.compile(r"[^A-Za-z0-9._ -]+")
+APP_PACKAGE_TOKENS = ("civitaitracker", "civitai-tracker")
+PORTABLE_PACKAGE_TOKENS = ("win", "windows", "exe", "onedir", "portable")
 RUNTIME_PRESERVE_NAMES = (
     "config.json",
     "api_key.txt",
@@ -143,20 +146,35 @@ def fetch_latest_release(
     raise UpdateError("No public releases were found.")
 
 
+def _compact_asset_name(name: str) -> str:
+    return name.lower().replace(" ", "").replace("_", "-")
+
+
+def is_portable_release_asset(asset: ReleaseAsset) -> bool:
+    if not asset.name.lower().endswith(".zip"):
+        return False
+    compact_name = _compact_asset_name(asset.name)
+    return any(token in compact_name for token in APP_PACKAGE_TOKENS) and any(
+        token in compact_name for token in PORTABLE_PACKAGE_TOKENS
+    )
+
+
 def choose_download_asset(info: UpdateInfo, execution_mode: str) -> ReleaseAsset | None:
     zip_assets = [asset for asset in info.assets if asset.name.lower().endswith(".zip")]
     if not zip_assets:
         return None
 
     mode = (execution_mode or "").lower()
-    preferred_tokens = ["civitaitracker", "civitai-tracker", "civitai_tracker"]
     if mode == "frozen":
-        preferred_tokens.extend(["win", "windows", "exe", "onedir"])
+        zip_assets = [asset for asset in zip_assets if is_portable_release_asset(asset)]
+        if not zip_assets:
+            return None
+        preferred_tokens = [*APP_PACKAGE_TOKENS, *PORTABLE_PACKAGE_TOKENS]
     else:
-        preferred_tokens.extend(["source", "src"])
+        preferred_tokens = [*APP_PACKAGE_TOKENS, "source", "src"]
 
     def score(asset: ReleaseAsset) -> tuple[int, int]:
-        compact_name = asset.name.lower().replace(" ", "").replace("_", "-")
+        compact_name = _compact_asset_name(asset.name)
         token_hits = sum(1 for token in preferred_tokens if token in compact_name)
         size_score = min(asset.size, 2_000_000_000)
         return (token_hits, size_score)
@@ -226,6 +244,48 @@ def download_asset(
 
 def release_asset_names(assets: Iterable[ReleaseAsset]) -> list[str]:
     return [asset.name for asset in assets]
+
+
+def _normalize_zip_name(name: str) -> str:
+    return name.replace("\\", "/").strip("/")
+
+
+def _zip_parent(path: str) -> str:
+    if "/" not in path:
+        return ""
+    return path.rsplit("/", 1)[0]
+
+
+def validate_portable_update_package(package_path: Path) -> str:
+    if not package_path.exists():
+        raise UpdateError(f"Update package was not found: {package_path}")
+
+    try:
+        with zipfile.ZipFile(package_path) as package:
+            files = [
+                _normalize_zip_name(info.filename)
+                for info in package.infolist()
+                if not info.is_dir() and _normalize_zip_name(info.filename)
+            ]
+    except zipfile.BadZipFile as exc:
+        raise UpdateError("The downloaded update package is not a readable ZIP file.") from exc
+    except OSError as exc:
+        raise UpdateError(f"Could not read the update package: {exc}") from exc
+
+    exe_roots = [
+        _zip_parent(name)
+        for name in files
+        if name.lower() == "civitaitracker.exe" or name.lower().endswith("/civitaitracker.exe")
+    ]
+    if not exe_roots:
+        raise UpdateError("The ZIP does not contain CivitAITracker.exe.")
+
+    for root in exe_roots:
+        internal_prefix = f"{root}/_internal/" if root else "_internal/"
+        if any(name.startswith(internal_prefix) for name in files):
+            return root or "."
+
+    raise UpdateError("The ZIP contains CivitAITracker.exe but is missing the _internal app folder.")
 
 
 def build_update_applier_script() -> str:
@@ -373,6 +433,7 @@ def launch_update_applier(
         raise UpdateError(f"Update package was not found: {package_path}")
     if not app_dir.exists():
         raise UpdateError(f"App folder was not found: {app_dir}")
+    validate_portable_update_package(package_path)
 
     updates_dir = app_dir / "updates"
     script_path = write_update_applier_script(updates_dir)

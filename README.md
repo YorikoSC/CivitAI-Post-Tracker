@@ -114,6 +114,8 @@ Open **Updates** in the app to check the latest GitHub release, download an atta
 
 By default, the app also checks for updates in the background on launch. The update applier preserves runtime data and creates a backup of replaced app files, but keeping your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` is still recommended.
 
+EXE auto-apply accepts only portable packages that contain `CivitAITracker.exe` and the `_internal/` app folder. Use **Exit app** in the main window or **Exit** in the tray menu to fully close the tracker.
+
 See `UPDATE_GUIDE.md` for the full update and rollback checklist.
 
 ## Recommended autonomous mode

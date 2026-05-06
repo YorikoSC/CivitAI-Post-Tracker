@@ -40,6 +40,8 @@ release\CivitAITracker-v<version>-win64.zip
 
 Attach this ZIP to the GitHub Release. The in-app Update Center looks for ZIP assets on the latest release.
 
+The EXE updater expects a portable package with `CivitAITracker.exe` and `_internal/` in the same app folder. Keep the generated `CivitAITracker-v<version>-win64.zip` naming pattern so the app can distinguish it from source archives.
+
 ## What to test after build
 
 1. Launch `CivitAITracker.exe`.

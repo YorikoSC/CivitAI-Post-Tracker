@@ -4,7 +4,7 @@ This project is distributed as a local portable app. Runtime data lives next to 
 
 ## Before Updating
 
-1. Close `CivitAITracker.exe`.
+1. Close `CivitAITracker.exe` with **Exit app** or the tray **Exit** menu item.
 2. Confirm auto polling is stopped.
 3. Back up these local files and folders if they exist:
 
@@ -32,6 +32,8 @@ The app can also check for updates in the background on launch. This can be chan
 
 The update applier preserves local runtime data such as `config.json`, `api_key.txt`, `civitai_tracker.db`, `csv/`, `logs/`, `dashboard.html`, and `runtime_status.json`.
 
+Automatic apply requires a portable EXE ZIP package containing `CivitAITracker.exe` and the `_internal/` app folder. Source ZIP files are rejected before the app closes.
+
 Automatic apply is intentionally limited to the packaged EXE build. Source-mode users should update through Git.
 
 ## Release Packages
@@ -48,7 +50,7 @@ The package is written to:
 release\CivitAITracker-v<version>-win64.zip
 ```
 
-Attach that ZIP to the GitHub Release so the app can find and download it.
+Attach that ZIP to the GitHub Release so the app can find and download it. The expected package name is similar to `CivitAITracker-v10.2.0-win64.zip`.
 
 ## Portable EXE Update
 

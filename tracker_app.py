@@ -111,6 +111,7 @@ from update_manager import (
     fetch_latest_release,
     format_bytes,
     launch_update_applier,
+    validate_portable_update_package,
 )
 
 
@@ -440,7 +441,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Checkbutton(self.app_tab, text="Check for updates on launch", variable=self.check_updates_on_launch_var).grid(row=row, column=1, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts.")
-        self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use the tray menu to exit fully.")
+        self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use Exit app or the tray menu to exit fully.")
 
     def _show_timezone_examples(self):
         messagebox.showinfo(
@@ -607,6 +608,7 @@ class UpdateDialog(tk.Toplevel):
         self.info: UpdateInfo | None = None
         self.asset: ReleaseAsset | None = None
         self.downloaded_path: Path | None = None
+        self.downloaded_package_ready = False
         self.is_busy = False
 
         self.status_var = tk.StringVar(value="Ready to check.")
@@ -706,7 +708,12 @@ class UpdateDialog(tk.Toplevel):
         self.check_btn.configure(state="disabled" if busy else "normal")
         self.release_btn.configure(state="disabled" if busy or self.info is None else "normal")
         can_download = bool(self.asset is not None and self.info is not None and self.info.update_available)
-        can_apply = bool(not busy and self.downloaded_path is not None and self.execution_mode == "frozen")
+        can_apply = bool(
+            not busy
+            and self.downloaded_path is not None
+            and self.downloaded_package_ready
+            and self.execution_mode == "frozen"
+        )
         self.download_btn.configure(state="disabled" if busy or not can_download else "normal")
         self.apply_btn.configure(state="normal" if can_apply else "disabled")
 
@@ -715,6 +722,8 @@ class UpdateDialog(tk.Toplevel):
             return
         self.info = None
         self.asset = None
+        self.downloaded_path = None
+        self.downloaded_package_ready = False
         self.latest_var.set("Checking...")
         self.asset_var.set("-")
         self.status_var.set("Checking for updates...")
@@ -737,13 +746,18 @@ class UpdateDialog(tk.Toplevel):
         self.latest_var.set(info.latest_tag or info.latest_version)
         if self.asset:
             self.asset_var.set(f"{self.asset.name} ({format_bytes(self.asset.size)})")
+        elif self.execution_mode == "frozen" and any(asset.name.lower().endswith(".zip") for asset in info.assets):
+            self.asset_var.set("No compatible EXE ZIP attached")
         else:
             self.asset_var.set("No ZIP package attached")
 
         self.status_var.set("Update available." if info.update_available else "You are up to date.")
         notes = info.release_notes or "No release notes were published for this release."
         if info.update_available and self.asset is None:
-            notes += "\n\nNo downloadable ZIP package is attached to this release. Open the release page and update manually."
+            if self.execution_mode == "frozen":
+                notes += "\n\nNo compatible portable EXE ZIP is attached to this release. Open the release page and update manually."
+            else:
+                notes += "\n\nNo downloadable ZIP package is attached to this release. Open the release page and update manually."
         if self.execution_mode != "frozen":
             notes += "\n\nSource mode is updated through Git. Automatic apply is available only in the packaged EXE build."
         self._set_notes(notes)
@@ -795,13 +809,22 @@ class UpdateDialog(tk.Toplevel):
 
     def _download_finished(self, target: Path):
         self.downloaded_path = target
+        self.downloaded_package_ready = False
         self.progress_var.set(100)
         self.progress_text_var.set("Done")
         self.status_var.set("Package downloaded.")
         if self.execution_mode == "frozen":
-            self._set_notes(
-                f"Downloaded:\n{target}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
-            )
+            try:
+                payload_root = validate_portable_update_package(target)
+                self.downloaded_package_ready = True
+                self._set_notes(
+                    f"Downloaded:\n{target}\n\nPackage check passed. Payload root: {payload_root}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
+                )
+            except Exception as exc:
+                self.status_var.set("Package downloaded but cannot be applied automatically.")
+                self._set_notes(
+                    f"Downloaded:\n{target}\n\nThis ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually."
+                )
         else:
             self._set_notes(
                 f"Downloaded:\n{target}\n\nSource mode is updated through Git. Use downloaded packages only for EXE/manual inspection."
@@ -811,6 +834,7 @@ class UpdateDialog(tk.Toplevel):
 
     def _download_failed(self, message: str):
         self.status_var.set("Download failed.")
+        self.downloaded_package_ready = False
         self._set_notes(message)
         self._set_busy(False)
 
@@ -820,6 +844,15 @@ class UpdateDialog(tk.Toplevel):
             return
         if self.downloaded_path is None or not self.downloaded_path.exists():
             messagebox.showinfo("Updates", "Download an update package first.", parent=self)
+            return
+        try:
+            validate_portable_update_package(self.downloaded_path)
+        except Exception as exc:
+            self.downloaded_package_ready = False
+            self.status_var.set("Package cannot be applied automatically.")
+            self._set_notes(f"This ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually.")
+            self._set_busy(False)
+            messagebox.showerror("Updates", str(exc), parent=self)
             return
         confirmed = messagebox.askyesno(
             "Apply update",
@@ -991,6 +1024,7 @@ class TrackerApp(tk.Tk):
         self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics)
         self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates)
         self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray)
+        self.exit_btn = ttk.Button(actions, text="Exit app", command=self.exit_app)
 
         buttons = [
             self.run_now_btn,
@@ -1003,6 +1037,7 @@ class TrackerApp(tk.Tk):
             self.diagnostics_btn,
             self.updates_btn,
             self.tray_btn,
+            self.exit_btn,
         ]
         for i, btn in enumerate(buttons):
             btn.grid(row=i // 2, column=i % 2, sticky="ew", padx=4, pady=4)
@@ -1011,6 +1046,7 @@ class TrackerApp(tk.Tk):
         card = self._make_card(parent, "How it behaves", 1, 0, columnspan=2)
         notes = [
             "Closing the window sends the app to the system tray instead of exiting.",
+            "Use Exit app to fully close the tracker.",
             "Auto polling keeps running while the app is hidden in the tray.",
             "Timezone must use IANA format, for example Europe/Moscow or America/New_York.",
             "Use API mode 'red' if you want full visibility for content above PG-13.",

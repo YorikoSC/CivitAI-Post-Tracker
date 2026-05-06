@@ -39,11 +39,13 @@ from tracker_service import (
 from update_manager import (
     RUNTIME_PRESERVE_NAMES,
     ReleaseAsset,
+    UpdateError,
     UpdateInfo,
     build_update_applier_script,
     choose_download_asset,
     is_newer_version,
     safe_filename,
+    validate_portable_update_package,
     version_key,
 )
 
@@ -77,8 +79,45 @@ class UpdateManagerSmokeTests(unittest.TestCase):
         self.assertIsNotNone(selected)
         self.assertEqual(selected.name, "CivitAITracker-v10.2-win64.zip")
 
+    def test_choose_download_asset_rejects_source_zip_for_frozen_build(self) -> None:
+        info = UpdateInfo(
+            current_version="10.1.1",
+            latest_version="TrackerV10.2",
+            latest_tag="TrackerV10.2",
+            release_name="Tracker v10.2",
+            release_url="https://example.test/release",
+            release_notes="",
+            published_at="",
+            prerelease=False,
+            update_available=True,
+            assets=(
+                ReleaseAsset("source.zip", "https://example.test/source.zip", 10),
+                ReleaseAsset("CivitAITracker-source.zip", "https://example.test/source2.zip", 20),
+            ),
+        )
+
+        self.assertIsNone(choose_download_asset(info, "frozen"))
+
     def test_download_filename_is_sanitized(self) -> None:
         self.assertEqual(safe_filename("../CivitAITracker:v10.2?.zip"), "CivitAITracker_v10.2_.zip")
+
+    def test_validate_portable_update_package_requires_exe_payload(self) -> None:
+        good_package = smoke_path("portable_package", ".zip")
+        bad_package = smoke_path("source_package", ".zip")
+        try:
+            with zipfile.ZipFile(good_package, "w") as package:
+                package.writestr("CivitAITracker/CivitAITracker.exe", "exe")
+                package.writestr("CivitAITracker/_internal/runtime.txt", "runtime")
+
+            with zipfile.ZipFile(bad_package, "w") as package:
+                package.writestr("README.md", "source archive")
+
+            self.assertEqual(validate_portable_update_package(good_package), "CivitAITracker")
+            with self.assertRaises(UpdateError):
+                validate_portable_update_package(bad_package)
+        finally:
+            good_package.unlink(missing_ok=True)
+            bad_package.unlink(missing_ok=True)
 
     def test_update_applier_preserves_runtime_data(self) -> None:
         script = build_update_applier_script()
