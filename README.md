@@ -121,7 +121,7 @@ If GitHub interrupts the in-app ZIP download, open the release page, download th
 If GitHub Release assets are unavailable on a network, add a mirror line to the GitHub Release notes:
 
 ```text
-Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
+Update package mirror: https://sourceforge.net/projects/civitai-post-tracker/files/CivitAITracker-v10.2.0-win64.zip/download
 ```
 
 When a mirror is present, the EXE Update Center will prefer it over the GitHub release asset.
