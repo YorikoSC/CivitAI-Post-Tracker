@@ -30,7 +30,7 @@
     "start_minimized": false,
     "start_auto_polling_on_launch": false,
     "check_updates_on_launch": true,
-    "enable_buzz_ingest": true
+    "enable_collection_tracking": true
   },
   "collection_tracking": {
     "account_type": "blue",

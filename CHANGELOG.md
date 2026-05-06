@@ -3,138 +3,71 @@
 ## v10.2.0
 
 ### Added
-- Added an in-app Update Center that checks GitHub releases, compares the current version with the latest public release, opens release notes, and downloads attached ZIP update packages.
-- Added optional background update checks on app launch.
-- Added a Windows update applier that can close the EXE build, back up replaced app files, apply a downloaded release package, and restart the app while preserving local runtime data.
-- Added shared app metadata in `app_info.py` so app title, dashboard title, user agents, and update checks use the same version source.
-- Added `package_release.bat` to build the EXE and create a release ZIP asset for GitHub Releases.
-- Added an `Exit app` button to the main window for fully closing the tracker without using the tray menu.
-- Added a manual **Select ZIP** fallback in the Update Center for cases where GitHub interrupts the in-app package download.
-- Added release-note mirror support for portable update packages when GitHub Release assets are unavailable.
+- In-app Update Center for release checks, release notes, package downloads, and compatible EXE updates.
+- Optional background update check on launch.
+- Automatic update applier for packaged EXE builds, including backups and updater logs.
+- Visible app version in the desktop UI.
+- `Exit app` button for fully closing the tracker from the main window.
+- `package_release.bat` for creating portable Windows release ZIPs.
+- Manual **Select ZIP** fallback, retry handling, and release-note mirror support for update packages.
 
 ### Changed
-- Updated documentation around portable updates to reflect the Update Center and release package flow.
-- Hardened Update Center package selection so EXE builds only auto-apply compatible portable ZIP packages.
-- Retried interrupted update package downloads before reporting a failure.
-- Prefer configured mirror package URLs over GitHub Release assets for EXE updates.
+- EXE builds now install project dependencies into `.venv` before PyInstaller runs.
+- EXE update package selection rejects source ZIP files and requires the portable app layout.
+- Mirror package URLs are preferred over GitHub Release assets when a release provides one.
 
 ## v10.1.1
 
 ### Added
-- Added `launch_tracker.pyw` as the supported no-console source launcher for Explorer/right-click startup.
-- Added `launch_tracker.bat` as a console-backed fallback for troubleshooting source-mode startup.
-- Added a single-instance guard so one app folder cannot run multiple tracker instances against the same config, API key file, and SQLite database.
+- `launch_tracker.pyw` as the supported no-console source launcher.
+- `launch_tracker.bat` as a visible-console troubleshooting fallback.
+- Single-instance guard per app folder.
 
 ### Changed
-- Source-mode autostart now points to the windowed Python launcher instead of the removed PowerShell launcher.
-- The EXE build script now prefers the local `.venv` Python environment and isolates user-site packages during PyInstaller builds.
-- Frozen startup now prepares bundled Tcl/Tk paths before importing Tkinter, improving EXE launch reliability from non-ASCII Windows paths.
-- Visible app/dashboard labels and tracker user agents now report v10.1.1.
-- Private Codex handoff notes are now ignored by git and kept out of tracked release files.
-
-### Notes
-- This is a patch release for v10.1. It does not change the dashboard feature scope.
-- For another tracked CivitAI account, use a separate app folder so each copy has its own config, API key, and database.
+- Source-mode autostart uses the windowed launcher.
+- EXE build flow prefers the local `.venv` and isolates user-site packages.
+- Frozen startup prepares bundled Tcl/Tk paths before Tkinter imports.
 
 ## v10.1
 
 ### Added
-- Added a Post performance table with current totals, recent gains, early-window reaction snapshots, collection activity, image count, and last seen data.
-- Added lazy thumbnail previews to post performance rows.
-- Added a post detail drawer with larger preview, compact metrics, post link, primary image link, and stored image links.
-- Added a Visual overview section with daily activity, reaction mix, and top movement charts.
-- Added a tabbed Analytics workspace for performance, collections, timing, and history tables.
-- Added workspace search plus active-row and image-only row filters.
-- Added quick period filters for Performance and Collections tables: day, week, month, year, and all time.
-- Added preview columns for collection image tables when local preview URLs are available.
-- Added image URL storage in `post_images` via `image_url` and `thumbnail_url`.
-- Added smoke tests for post performance metrics, image-only collection links, and CivitAI imagecache preview URL handling.
+- Post performance table with current totals, recent gains, early snapshots, collection activity, image count, and last-seen data.
+- Lazy thumbnail previews and post detail drawer.
+- Visual overview charts.
+- Tabbed Analytics workspace for Performance, Collections, Timing, and History.
+- Search, recent-activity filtering, image-only filtering, and period filters.
+- Preview columns for collection image tables.
+- Image URL storage in `post_images`.
 
 ### Changed
 - Replaced the lower stack of collapsible dashboard tables with the Analytics workspace.
-- Collection image-only rows now link directly to CivitAI image pages and show `Post mapping not found locally` instead of `Unlinked image`.
-- Missing post preview URLs now fall back to an `Open image` link when an image ID is known.
-- Collection `Open image` fallbacks now use the same thumbnail-sized preview slot as image previews.
-- Hidden preview fallback blocks are now forced hidden until an image load error occurs.
-- Image metadata enrichment now builds CivitAI imagecache URLs from `image.getInfinite` UUID tokens and avoids nested profile/avatar URLs.
-- Dashboard browser sorting now honors explicit numeric/date sort values.
-- Visible app/dashboard labels and tracker user agents now report v10.1.
-
-### Notes
-- Existing local image rows without stored image IDs may still show `No preview` until a normal tracker run refreshes image metadata from CivitAI.
-- The v10.1 release scope is dashboard monitoring polish. Broader application UI redesign remains a good candidate for v10.2.
-- Portable update and rollback guidance is documented in `UPDATE_GUIDE.md`.
+- Image-only collection rows link directly to CivitAI image pages and use `Post mapping not found locally`.
+- Preview fallbacks use aligned thumbnail-sized slots.
+- Dashboard sorting uses explicit numeric/date sort values.
 
 ## v10.0.1
 
 ### Added
-- Added collection sync state storage via `collection_sync_state`.
-- Added collection runtime helpers via `collection_runtime`.
-- Added bootstrap vs maintenance collection sync modes.
-- Added collection coverage metadata and partial-history warnings for the dashboard.
-- Added collection-history rebuild helper for safe collections-only resets.
-- Added collection diagnostics to `logs/core_last.log`, including page summaries and raw transaction type counts.
-- Added self-contained smoke tests for collection parser, config compatibility, sync state, ingest mode switching, and dashboard file writes.
+- Collection sync state storage.
+- Bootstrap and maintenance sync modes.
+- Collection coverage metadata and partial-history warnings.
+- Collection diagnostics in `logs/core_last.log`.
+- Smoke tests for collection parsing, config compatibility, sync state, ingest mode switching, and dashboard file writes.
 
 ### Changed
-- Collection sync now honors nested config and legacy/flat config compatibility.
-- Collection history now uses a safe backfill window and clear stop reasons (`reached_control_point`, `source_exhausted`, `page_limit_reached`, `error`).
-- Cursor handling is now validated to prevent bad `cursor=Date` requests.
-- tRPC transaction parsing now handles batched response shapes and both `transactions` and `items` payload keys.
-- Dashboard HTML is rewritten atomically, includes a generated timestamp, and is opened with a cache-busting version parameter from the app.
-- Runtime paths for DB, CSV, dashboard HTML, and API key file are resolved relative to `config.json`.
-- New configs use `options.enable_collection_tracking`; the old `options.enable_buzz_ingest` key is still accepted.
+- Collection sync supports nested and legacy config shapes.
+- Cursor handling avoids invalid `cursor=Date` requests.
+- Runtime paths for database, CSV, dashboard HTML, and API key file are resolved relative to `config.json`.
+- New configs use `options.enable_collection_tracking`; `options.enable_buzz_ingest` remains a compatibility alias.
 
 ## v10.0
 
 ### Added
-- Added collection tracking for images.
-- Added incoming content engagement storage in `content_engagement_events`.
-- Added image-to-post correlation for collection events.
-- Added a new Collections section to the dashboard.
-- Added collection-focused summary cards, recent events, top posts and top images.
-
-### Changed
-- Dashboard now includes collection-focused analytics without duplicating the existing reaction statistics.
-- User-facing terminology now focuses on collections and content engagement rather than internal transaction/reward wording.
+- Collection tracking for images.
+- Incoming content engagement storage in `content_engagement_events`.
+- Image-to-post correlation for collection events.
+- Collections dashboard section.
 
 ### Notes
 - Collection tracking requires API key access.
-- Without an API key, the app runs in limited public mode: collection tracking is unavailable and restricted / NSFW posts may be missing or incomplete.
-- Internal config names are kept compatible with the existing implementation.
-
-## v9
-
-### Added
-- Added Python 3.11-compatible service-layer architecture.
-- Extracted one-shot collection logic into `tracker_service.py`.
-- Converted `tracker_core.py` into a thin CLI wrapper.
-- Removed subprocess-based core execution from the runner.
-- Added source/frozen path handling.
-- Added PowerShell source launcher (`launch_tracker.ps1`).
-- Added PyInstaller `onedir` build flow and spec file.
-- Added startup self-check and Diagnostics view.
-- Stabilized autonomous tray-based runtime flow.
-
-## v8.8
-
-### Changed
-- Moved detailed analytics tables into a cleaner single-column dashboard flow.
-- Added collapsible analytics sections for heavy detail blocks.
-- Added browser-side auto-refresh for the generated dashboard.
-- Continued dashboard readability polish.
-
-## v8.7
-
-### Added
-- Added `Start auto polling on launch`.
-- Startup, minimized-to-tray, and Windows autostart can now begin polling automatically.
-- Added `runtime_status.json` tracking for live runner state.
-- Dashboard now shows runtime status cards.
-
-## v8.5.3
-
-### Changed
-- Cleaned up launcher strategy.
-- Reduced reliance on batch files for normal startup.
-- Added build-flow groundwork for EXE packaging.
+- Without an API key, the app runs in limited public mode: collection tracking is unavailable and restricted or NSFW posts may be missing or incomplete.

@@ -1,12 +1,10 @@
 # Update Guide
 
-This project is distributed as a local portable app. Runtime data lives next to the app unless your `config.json` points somewhere else.
+CivitAI Tracker is a portable local app. Runtime data lives next to the app folder unless `config.json` points elsewhere.
 
-## Before Updating
+## What To Back Up
 
-1. Close `CivitAITracker.exe` with **Exit app** or the tray **Exit** menu item.
-2. Confirm auto polling is stopped.
-3. Back up these local files and folders if they exist:
+Before major updates, back up:
 
 ```text
 config.json
@@ -20,109 +18,95 @@ runtime_status.json
 
 The most important files are `config.json`, `api_key.txt`, and `civitai_tracker.db`.
 
-## In-App Update Check
+## Source Mode
 
-1. Open **Updates** in the app.
-2. Wait for the GitHub release check.
-3. If an update is available, open the release page or download the attached ZIP package.
-4. The downloaded package is saved to `updates/`.
-5. In EXE mode, choose **Apply downloaded update** to close the app, back up replaced app files, apply the package, and restart.
+Source-mode users update through Git:
 
-If the in-app download fails because the connection is interrupted, choose **Open release**, download the ZIP in your browser, then choose **Select ZIP** in the Updates dialog and apply it from there.
-
-If GitHub Release assets are unavailable on a network, upload the same portable ZIP to another storage provider and add this line to the GitHub Release notes:
-
-```text
-Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
+```powershell
+git pull
+python -m pip install -r requirements.txt
 ```
 
-The Update Center prefers mirror package links over GitHub release assets.
+Then launch the app and run **Diagnostics**.
 
-The app can also check for updates in the background on launch. This can be changed in **Settings**.
+## EXE Mode
 
-The update applier preserves local runtime data such as `config.json`, `api_key.txt`, `civitai_tracker.db`, `csv/`, `logs/`, `dashboard.html`, and `runtime_status.json`.
+Open **Updates** in the app.
 
-Automatic apply requires a portable EXE ZIP package containing `CivitAITracker.exe` and the `_internal/` app folder. Source ZIP files are rejected before the app closes.
+1. Run **Check now**.
+2. Review the latest release notes.
+3. Download the selected package.
+4. Choose **Apply downloaded update**.
 
-Automatic apply is intentionally limited to the packaged EXE build. Source-mode users should update through Git.
+Automatic apply is available only in the packaged EXE build. The package must contain `CivitAITracker.exe` and the `_internal/` app folder. Source ZIP files are rejected before the app closes.
+
+During apply, the updater:
+
+- closes the running app;
+- extracts the portable package;
+- preserves local runtime data;
+- backs up replaced app files under `updates\backup-<timestamp>\`;
+- writes `updates\update_apply.log`;
+- restarts the app when possible.
+
+## Manual Package Fallback
+
+If the in-app download fails, use **Open release**, download the ZIP in a browser, then choose **Select ZIP** in the Updates dialog.
+
+If GitHub Release assets are unavailable on a network, publish the same portable ZIP to a direct-download mirror and add this line to the GitHub Release notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v<version>-win64.zip
+```
+
+When a mirror line is present, the EXE Update Center prefers it over GitHub Release assets.
 
 ## Release Packages
 
-Release ZIP packages should be built with:
+Build the release ZIP with:
 
 ```powershell
 package_release.bat
 ```
 
-The package is written to:
+Output:
 
 ```text
 release\CivitAITracker-v<version>-win64.zip
 ```
 
-Attach that ZIP to the GitHub Release so the app can find and download it. The expected package name is similar to `CivitAITracker-v10.2.0-win64.zip`.
-
-## Portable EXE Update
-
-1. Build or download the new `dist\CivitAITracker` folder.
-2. Keep your existing runtime files from the old folder.
-3. Replace the application files with the new build.
-4. Copy your runtime files back if you updated into a fresh folder.
-5. Start `CivitAITracker.exe`.
-6. Open Diagnostics.
-7. Run now.
-8. Open the dashboard and confirm the generated timestamp changed.
-
-## Update Backups
-
-Automatic updates store replaced app files under:
-
-```text
-updates\backup-<timestamp>\
-```
-
-The updater writes its log to:
-
-```text
-updates\update_apply.log
-```
-
-## Database Migrations
-
-The tracker performs small SQLite migrations at startup/run time. For v10.1, the `post_images` table gains:
-
-- `image_url`
-- `thumbnail_url`
-
-These columns are added automatically. Keep a database backup before the first run after any update.
-
-## Config Compatibility
-
-Older collection settings are still normalized:
-
-- `options.enable_buzz_ingest` still maps to collection tracking.
-- `collection_tracking.max_pages` maps into bootstrap and maintenance page limits.
-- `collection_tracking.backfill_days` maps into `max_history_days`.
-
-New configs should use `options.enable_collection_tracking`.
+Attach this ZIP to the GitHub Release when release assets are usable, and publish the same ZIP to the mirror used in the release notes.
 
 ## After Updating
 
 Check:
 
-- Diagnostics opens without errors.
-- `Run now` completes.
-- `logs\core_last.log` has `ok: true` for core sections.
-- `dashboard.html` shows the new app version in the header.
-- The dashboard preview images render or fall back to `Open image`.
+- the app starts and shows the expected version;
+- **Diagnostics** opens without errors;
+- **Run now** completes;
+- `logs\core_last.log` does not show a fatal error;
+- `dashboard.html` shows a fresh `generated ...` timestamp;
+- local `config.json`, `api_key.txt`, and `civitai_tracker.db` are still present.
 
 ## Rollback
 
 If an update fails:
 
 1. Close the app.
-2. Restore the previous app folder.
-3. Restore the backed-up `config.json`, `api_key.txt`, and `civitai_tracker.db`.
-4. Launch the previous version and run Diagnostics.
+2. Restore the previous app folder or the relevant files from `updates\backup-<timestamp>\`.
+3. Restore `config.json`, `api_key.txt`, and `civitai_tracker.db` from your manual backup if needed.
+4. Launch the previous version and run **Diagnostics**.
 
-Avoid mixing an older executable with a database after a newer version has already migrated it unless you have a backup.
+Avoid using an older executable with a database that has already been migrated by a newer version unless you have a backup.
+
+## Compatibility Notes
+
+The app performs small SQLite migrations at startup or run time. These are automatic, but a database backup is still recommended before major updates.
+
+Older config keys are normalized:
+
+- `options.enable_buzz_ingest` maps to collection tracking.
+- `collection_tracking.max_pages` maps into bootstrap and maintenance page limits.
+- `collection_tracking.backfill_days` maps to `max_history_days`.
+
+New configs should use `options.enable_collection_tracking`.

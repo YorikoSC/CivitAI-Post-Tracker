@@ -1,154 +1,119 @@
-# CivitAI Tracker v10.2.0
+# CivitAI Tracker
 
-A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
+A local Windows-first desktop app for tracking CivitAI post performance, collection activity, CSV snapshots, and a generated HTML dashboard.
 
-v10 adds **collection tracking**: the dashboard can now show which of your images were added to collections and which posts were affected through those images.
+The app keeps its runtime data on your machine. It can run from source or as a portable PyInstaller EXE build.
 
-v10.1 turns the dashboard into a monitoring workspace: post performance rows, lazy image previews, a post detail drawer, and filtered analytics tabs for performance, collections, timing, and history.
+## What It Does
 
-v10.1.1 is a patch release focused on reliable source/EXE startup, no-console launching from Explorer, and one-instance-per-folder safety.
-
-v10.2 adds a built-in Update Center for checking GitHub releases, downloading portable packages, and applying EXE updates with backups.
-
-## Features
-
-- Local post analytics for CivitAI posts
-- Reaction tracking by post
-- Post performance table with current totals, recent gains, early-window snapshots, and collection activity
-- Lazy-loaded thumbnail previews and a post detail drawer in the dashboard
-- Visual dashboard overview with daily activity, reaction mix, and top movement charts
-- Tabbed dashboard workspace with table search, period filters, and quick filters
-- Suggested posting windows based on historical performance
-- HTML dashboard with runtime status
-- Auto polling with tray support
-- Update Center for GitHub release checks and portable package downloads
-- Source mode launcher via windowed Python launcher
-- Single running instance per app folder to protect the local config and database
-- EXE build flow via PyInstaller (`onedir`)
-- Collection tracking for your images
-- Image-to-post correlation for collection events
-
-## Collection tracking
-
-Collection tracking focuses on incoming engagement with your own content:
-
-- **Added to collections**
-- **Affected images**
-- **Affected posts**
-- Recent collection events
-- Top posts/images by collection additions
-
-The dashboard intentionally does not duplicate the existing reaction analytics. Likes/reactions remain in the existing reaction sections; the new Collections section focuses on collection additions.
-
-## API key notes
-
-The app can start without an API key, but it will run in **limited public mode**. This mode is useful for basic public checks, but it is not equivalent to full tracking.
-
-Without an API key:
-
-- the main app should still start;
-- collection tracking is unavailable;
-- user-scoped transaction data is unavailable;
-- restricted / NSFW posts may be missing or incomplete, depending on what CivitAI exposes publicly;
-- dashboard statistics may be incomplete for accounts that publish PG-13+ / restricted content.
-
-For full tracking, especially collection tracking and restricted-content visibility, provide a CivitAI API key.
+- Tracks CivitAI posts from a configured start point.
+- Stores current reaction/comment totals and historical snapshots in SQLite.
+- Exports CSV snapshots.
+- Generates a local HTML dashboard with performance tables, preview thumbnails, charts, and collection analytics.
+- Tracks collection additions for your images when authenticated access is available.
+- Runs manual checks or automatic polling from a tray-enabled desktop UI.
+- Checks GitHub Releases for portable EXE updates.
 
 ## Requirements
 
-- Python 3.11+
-- Windows is the primary target
-- CivitAI API key recommended; required for collection tracking
+- Windows is the primary target.
+- Python 3.11 or newer for source mode and local builds.
+- A CivitAI API key is recommended and required for collection tracking.
 
-## Quick start: source mode
+## API Key And Limited Mode
 
-1. Install dependencies:
+The app can start without a CivitAI API key. In that state it runs in limited public mode.
+
+Without an API key:
+
+- the main app should still open;
+- public post checks can still run when CivitAI exposes the data publicly;
+- collection tracking is unavailable;
+- user-scoped transaction data is unavailable;
+- restricted or NSFW posts may be missing or incomplete;
+- dashboard totals may be incomplete for accounts that publish restricted content.
+
+For full tracking, especially collection activity and restricted-content visibility, configure an API key in **Settings**.
+
+The key can be stored inline in `config.json` or in a separate file such as `api_key.txt`. Do not commit either file.
+
+## Quick Start: Source Mode
+
+Install dependencies:
 
 ```powershell
 python -m pip install -r requirements.txt
 ```
 
-2. Create or edit `config.json` based on `config.example.json`.
-
-3. Launch the app:
+Create `config.json` from `config.example.json`, then launch:
 
 ```powershell
 .\launch_tracker.pyw
 ```
 
-For source debugging with the console visible:
+For troubleshooting with a visible console:
 
 ```powershell
 python tracker_app.py
 ```
 
-If the windowed launcher needs troubleshooting, `launch_tracker.bat` remains available as a console-backed fallback.
+`launch_tracker.bat` is also available as a console-backed launcher fallback.
 
-## Quick start: EXE mode
+## Quick Start: EXE Mode
 
-1. Build the EXE:
+Build the portable app:
 
 ```powershell
 build_exe.bat
 ```
 
-The build script creates and uses the project-local `.venv`, installs `requirements.txt`, and runs PyInstaller from that same environment.
+The build script creates and uses `.venv`, installs `requirements.txt`, installs PyInstaller, verifies runtime imports, and builds from that same environment.
 
-2. Open:
-
-```text
-dist\CivitAITracker
-```
-
-3. Run:
+Run:
 
 ```text
-CivitAITracker.exe
+dist\CivitAITracker\CivitAITracker.exe
 ```
 
-On first launch, open **Settings**, save your configuration, then use **Diagnostics** to confirm the environment is healthy.
+For a release ZIP:
 
-## Updating
-
-Open **Updates** in the app to check the latest GitHub release, download an attached portable ZIP package, and apply it from the EXE build.
-
-By default, the app also checks for updates in the background on launch. The update applier preserves runtime data and creates a backup of replaced app files, but keeping your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` is still recommended.
-
-EXE auto-apply accepts only portable packages that contain `CivitAITracker.exe` and the `_internal/` app folder. Use **Exit app** in the main window or **Exit** in the tray menu to fully close the tracker.
-
-If GitHub interrupts the in-app ZIP download, open the release page, download the ZIP in your browser, then use **Select ZIP** in the Updates dialog.
-
-If GitHub Release assets are unavailable on a network, add a mirror line to the GitHub Release notes:
-
-```text
-Update package mirror: https://sourceforge.net/projects/civitai-post-tracker/files/CivitAITracker-v10.2.0-win64.zip/download
+```powershell
+package_release.bat
 ```
 
-When a mirror is present, the EXE Update Center will prefer it over the GitHub release asset.
+The package is written to `release\CivitAITracker-v<version>-win64.zip`.
 
-See `UPDATE_GUIDE.md` for the full update and rollback checklist.
+## Configuration Basics
 
-## Recommended autonomous mode
-
-For a mostly hands-off workflow:
-
-- **Launch with Windows** = enabled
-- **Start minimized to tray** = enabled
-- **Start auto polling on launch** = enabled
-
-## Configuration
-
-Important collection-related settings:
+The most important settings live in `config.json`:
 
 ```json
 {
-  "app": {
-    "config_version": 2
+  "profile": {
+    "username": "",
+    "timezone": "UTC"
+  },
+  "auth": {
+    "api_key": "",
+    "api_key_file": "api_key.txt"
+  },
+  "tracking": {
+    "start_mode": "post_id",
+    "start_post_id": null,
+    "start_date": null,
+    "poll_minutes": 15
   },
   "options": {
     "check_updates_on_launch": true,
     "enable_collection_tracking": true
-  },
+  }
+}
+```
+
+Collection tracking options are under `collection_tracking`. The default config separates the first bootstrap sync from later maintenance syncs:
+
+```json
+{
   "collection_tracking": {
     "account_type": "blue",
     "bootstrap_max_pages": 100,
@@ -160,44 +125,59 @@ Important collection-related settings:
 }
 ```
 
-The old internal key name `enable_buzz_ingest` is still accepted for compatibility. New configs should use `enable_collection_tracking`, and the dashboard refers to this feature as collection tracking.
+Older configs are normalized at load time. `options.enable_buzz_ingest` is still accepted as a compatibility alias for `options.enable_collection_tracking`, but new configs should use `enable_collection_tracking`.
 
-Older configs that still use `collection_tracking.max_pages` or `collection_tracking.backfill_days` are normalized into the newer `bootstrap_max_pages`, `maintenance_max_pages`, and `max_history_days` fields.
+## Dashboard
 
-## Main files
+The dashboard is generated as `dashboard.html` and opened from the desktop app. It includes:
 
-- `tracker_app.py` — desktop UI
-- `tracker_runner.py` — polling loop and runtime orchestration
-- `tracker_service.py` — one-shot collection service and dashboard generation
-- `tracker_core.py` — thin CLI wrapper around the service layer
-- `buzz_ingest.py` — internal incoming engagement ingestion
-- `collection_runtime.py` — collection config normalization and sync-mode decisions
-- `collection_sync_state.py` — collection sync state schema and persistence
-- `engagement_correlation.py` — maps image-level events to tracked posts
-- `engagement_dashboard.py` — renders the Collections dashboard section
-- `config_utils.py` — config, path and diagnostics helpers
+- current tracking status;
+- reaction and comment totals;
+- daily and weekly movement;
+- visual overview charts;
+- suggested posting windows;
+- post performance table with quick period filters;
+- collection activity tables;
+- thumbnail previews and post detail drawer when image metadata is available.
 
-## Local data and privacy
+See `DASHBOARD_GUIDE.md` for interpretation notes and known limits.
 
-The tracker stores runtime data locally:
+## Updates
+
+Source-mode users update through Git.
+
+EXE users can use **Updates** in the app to check the latest GitHub Release, download a compatible portable ZIP package, and apply it automatically. Automatic apply is available only in the packaged EXE build.
+
+The updater preserves local runtime data and stores replaced app files under `updates\backup-<timestamp>\`. Keep your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` before major updates.
+
+If GitHub Release assets are unavailable on your network, a release can provide a direct mirror URL in its notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v<version>-win64.zip
+```
+
+When a mirror line is present, the EXE Update Center prefers that package URL over GitHub Release assets.
+
+See `UPDATE_GUIDE.md` for update, rollback, and release-package details.
+
+## Local Data And Privacy
+
+Runtime files are local and should not be committed:
 
 - `config.json`
-- `api_key.txt` if you choose file-based API key storage
+- `api_key.txt`
 - `civitai_tracker.db`
 - `csv/`
 - `logs/`
 - `dashboard.html`
 - `runtime_status.json`
+- `updates/`
 
-Do not commit these files to GitHub.
+To track multiple CivitAI accounts, use separate app folders. Each folder keeps its own config, API key file, database, logs, and dashboard.
 
 ## Troubleshooting
 
-Run a syntax check:
-
-```powershell
-python -m py_compile tracker_app.py tracker_runner.py tracker_service.py tracker_core.py buzz_ingest.py collection_runtime.py collection_sync_state.py engagement_correlation.py engagement_dashboard.py
-```
+Open **Diagnostics** in the app first. It checks configuration, paths, API-key availability, and write access.
 
 Run smoke tests:
 
@@ -211,46 +191,18 @@ Check the latest run summary:
 Get-Content .\logs\core_last.log
 ```
 
-For collection tracking, inspect:
+If collection tracking is empty, check that:
 
-- `collection_ingest.ok`
-- `collection_ingest.collection_mode`
-- `collection_ingest.pages_fetched`
-- `collection_ingest.events_seen`
-- `collection_ingest.events_core`
-- `collection_ingest.type_counts`
-- `collection_ingest.stop_reason`
-- `engagement_correlation.ok`
-- `engagement_correlation.distinct_posts_correlated`
+- an API key is configured;
+- collection tracking is enabled;
+- the account has recent collection events;
+- `logs\core_last.log` does not report `collection_ingest.reason: API key required`.
 
-Check the engagement table directly:
+If the dashboard looks stale, run the tracker again and check the `generated ...` timestamp in the dashboard header.
 
-```powershell
-python -c "import sqlite3; c=sqlite3.connect('civitai_tracker.db'); print(c.execute(\"SELECT COUNT(*) FROM content_engagement_events WHERE normalized_type='collection_like'\").fetchone()[0]); c.close()"
-```
+## Related Docs
 
-If collection tracking is empty, verify that your API key is configured, recent collection events exist for your account, and `collection_ingest.page_summaries` contains `collectedContent:image`.
-
-## Build verification
-
-Before publishing or merging a cleanup branch:
-
-1. Run the syntax check above.
-2. Launch `launch_tracker.pyw` from Explorer and confirm the app opens without a console window.
-3. Run the app from source and confirm `Run now` updates `logs/core_last.log`.
-4. Build with `build_exe.bat`.
-5. Launch `dist\CivitAITracker\CivitAITracker.exe`.
-6. Test with and without an API key.
-7. Open the dashboard from the app and confirm the `generated ...` timestamp changes after a run.
-
-
-## Collection sync modes
-
-Collection tracking now uses two modes:
-
-- **bootstrap**: first full collection history load within the safe backfill window;
-- **maintenance**: lightweight incremental sync after bootstrap is complete.
-
-If the available source history ends before the selected tracking start, the tracker treats that as a normal completed load. If the page limit is reached first, collection totals are marked as potentially incomplete.
-
-The generated dashboard is rewritten atomically and opened with a cache-busting version parameter from the desktop app. If the dashboard looks stale, check the `generated ...` timestamp at the top of the page first.
+- `DASHBOARD_GUIDE.md` - dashboard interpretation and limits.
+- `UPDATE_GUIDE.md` - update and rollback flow.
+- `EXE_BUILD.md` - build and package flow.
+- `CHANGELOG.md` - release history.

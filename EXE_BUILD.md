@@ -1,8 +1,8 @@
-# EXE build notes
+# EXE Build Guide
 
-Recommended build mode: **PyInstaller onedir**.
+The supported Windows build is a PyInstaller `onedir` package driven by the project-local `.venv`.
 
-The build is intentionally driven by the project-local `.venv`. This avoids installing packages into Microsoft Store Python or any other global Python environment.
+This keeps build dependencies out of Microsoft Store Python and other global Python installs.
 
 ## Build
 
@@ -10,15 +10,13 @@ The build is intentionally driven by the project-local `.venv`. This avoids inst
 build_exe.bat
 ```
 
-`build_exe.bat` will:
+The script:
 
-- create `.venv` if it does not exist;
-- install `requirements.txt` into `.venv`;
-- install or update PyInstaller in `.venv`;
-- verify runtime imports such as `requests`;
-- run PyInstaller from the same `.venv`.
-
-The script limits pip retry/timeout behavior so an offline or restricted machine fails quickly instead of hanging on long PyPI retries.
+- creates `.venv` if needed;
+- installs `requirements.txt` into `.venv`;
+- installs or updates PyInstaller in `.venv`;
+- verifies runtime imports such as `requests`;
+- runs PyInstaller from the same `.venv`.
 
 Output:
 
@@ -26,7 +24,14 @@ Output:
 dist\CivitAITracker\CivitAITracker.exe
 ```
 
-## Release ZIP
+If dependency installation fails, fix the local `.venv` first:
+
+```powershell
+.venv\Scripts\python.exe -m pip install -r requirements.txt
+.venv\Scripts\python.exe -m pip install --upgrade pyinstaller
+```
+
+## Release Package
 
 ```powershell
 package_release.bat
@@ -38,52 +43,30 @@ Output:
 release\CivitAITracker-v<version>-win64.zip
 ```
 
-Attach this ZIP to the GitHub Release. The in-app Update Center looks for ZIP assets on the latest release.
+The package must contain `CivitAITracker.exe` and `_internal/` in the same app folder. Keep the `CivitAITracker-v<version>-win64.zip` naming pattern so the updater can distinguish the portable package from source archives.
 
-The EXE updater expects a portable package with `CivitAITracker.exe` and `_internal/` in the same app folder. Keep the generated `CivitAITracker-v<version>-win64.zip` naming pattern so the app can distinguish it from source archives.
-
-If GitHub Release assets are unavailable on the target network, upload the same ZIP to a mirror and add this line to the GitHub Release notes:
+If GitHub Release assets are unreliable for the target audience, upload the same ZIP to a direct-download mirror and include this line in the GitHub Release notes:
 
 ```text
 Update package mirror: https://example.com/CivitAITracker-v<version>-win64.zip
 ```
 
-The EXE Update Center prefers mirror package URLs over GitHub Release assets.
+## Build Smoke Test
 
-## What to test after build
+After building:
 
-1. Launch `CivitAITracker.exe`.
-2. Open Diagnostics.
-3. Save Settings if this is a fresh folder.
-4. Run now.
-5. Open dashboard.
-6. Confirm the Collections section appears when collection data exists.
-7. Confirm the Post performance table appears in the Analytics workspace.
-8. Confirm the Performance and Collections period filters work: day, week, month, year, all time.
-9. Confirm post thumbnails load, or fall back to `Open image` when only an image ID is known.
-10. Confirm `Open image` collection fallbacks stay aligned inside the preview column.
-11. Confirm the Visual overview charts appear above the posting recommendations.
-12. Confirm clicking a post performance row opens the post detail drawer.
-13. Confirm collection image rows link to `/images/{image_id}` when no local post mapping exists.
-14. Confirm the dashboard header `generated ...` timestamp changes after a new run.
-15. Check `logs\core_last.log` and confirm `collection_ingest.ok` is true when an API key is configured.
+1. Run `dist\CivitAITracker\CivitAITracker.exe --version`.
+2. Launch `dist\CivitAITracker\CivitAITracker.exe`.
+3. Open **Diagnostics**.
+4. Save **Settings** if testing from a fresh folder.
+5. Run **Run now**.
+6. Open the dashboard and confirm the `generated ...` timestamp changed.
+7. Confirm previews, Performance filters, and Collections filters still render correctly.
+8. Check `logs\core_last.log` for fatal errors.
 
-## v10 / v10.1 modules
+When testing collection tracking, use a configured API key and confirm `collection_ingest.ok` is true or that any reported reason is expected.
 
-The v10 collection tracking and v10.1 dashboard monitoring layers use:
-
-- `buzz_ingest.py`
-- `collection_runtime.py`
-- `collection_sync_state.py`
-- `engagement_correlation.py`
-- `engagement_dashboard.py`
-- `tracker_service.py`
-
-The collection modules are imported by `tracker_service.py` and should be picked up by PyInstaller. The spec also lists them explicitly as hidden imports for safety.
-
-`requests` is also listed explicitly as a hidden import as a defensive check, but the primary guarantee is that `requirements.txt` is installed into the same `.venv` used by PyInstaller.
-
-## Do not ship personal runtime files
+## Do Not Ship Runtime Data
 
 Do not include:
 
@@ -94,3 +77,4 @@ Do not include:
 - `logs/`
 - `dashboard.html`
 - `runtime_status.json`
+- `updates/`
