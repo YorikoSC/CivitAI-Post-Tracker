@@ -2,15 +2,15 @@
 setlocal
 cd /d "%~dp0"
 
-set "PYTHON_EXE=python"
-if exist ".venv\Scripts\python.exe" set "PYTHON_EXE=.venv\Scripts\python.exe"
+call build_exe.bat || goto :fail
+
+set "PYTHON_EXE=.venv\Scripts\python.exe"
+if not exist "%PYTHON_EXE%" goto :fail
 
 if not exist ".tmp_build" mkdir ".tmp_build" >nul 2>nul
 "%PYTHON_EXE%" -c "from app_info import APP_VERSION; print(APP_VERSION)" > ".tmp_build\app_version.txt" || goto :fail
 set /p APP_VERSION=<".tmp_build\app_version.txt"
 if not defined APP_VERSION goto :fail
-
-call build_exe.bat || goto :fail
 
 if not exist "release" mkdir "release" >nul 2>nul
 set "PACKAGE=release\CivitAITracker-v%APP_VERSION%-win64.zip"

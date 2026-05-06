@@ -3,6 +3,7 @@
 from PyInstaller.utils.hooks import collect_submodules
 
 hiddenimports = [
+    'requests',
     'pystray._win32',
     'PIL._tkinter_finder',
     'buzz_ingest',

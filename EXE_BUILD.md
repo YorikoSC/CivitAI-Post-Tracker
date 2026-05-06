@@ -2,11 +2,23 @@
 
 Recommended build mode: **PyInstaller onedir**.
 
+The build is intentionally driven by the project-local `.venv`. This avoids installing packages into Microsoft Store Python or any other global Python environment.
+
 ## Build
 
 ```powershell
 build_exe.bat
 ```
+
+`build_exe.bat` will:
+
+- create `.venv` if it does not exist;
+- install `requirements.txt` into `.venv`;
+- install or update PyInstaller in `.venv`;
+- verify runtime imports such as `requests`;
+- run PyInstaller from the same `.venv`.
+
+The script limits pip retry/timeout behavior so an offline or restricted machine fails quickly instead of hanging on long PyPI retries.
 
 Output:
 
@@ -58,6 +70,8 @@ The v10 collection tracking and v10.1 dashboard monitoring layers use:
 - `tracker_service.py`
 
 The collection modules are imported by `tracker_service.py` and should be picked up by PyInstaller. The spec also lists them explicitly as hidden imports for safety.
+
+`requests` is also listed explicitly as a hidden import as a defensive check, but the primary guarantee is that `requirements.txt` is installed into the same `.venv` used by PyInstaller.
 
 ## Do not ship personal runtime files
 

@@ -180,6 +180,20 @@ class UpdateManagerSmokeTests(unittest.TestCase):
             except OSError:
                 pass
 
+    def test_build_flow_installs_runtime_requirements_before_pyinstaller(self) -> None:
+        build_script = (ROOT / "build_exe.bat").read_text(encoding="utf-8")
+        requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+        spec = (ROOT / "civitai_tracker.spec").read_text(encoding="utf-8")
+
+        self.assertIn("requests", requirements)
+        self.assertIn("set \"PYTHON_EXE=%VENV_DIR%\\Scripts\\python.exe\"", build_script)
+        self.assertIn("-m venv", build_script)
+        self.assertIn("-m pip install -r requirements.txt", build_script)
+        self.assertIn("-m pip install --upgrade pyinstaller", build_script)
+        self.assertIn("import requests", build_script)
+        self.assertIn("-m PyInstaller --noconfirm --clean civitai_tracker.spec", build_script)
+        self.assertIn("'requests'", spec)
+
 
 class CollectionParserSmokeTests(unittest.TestCase):
     def test_trpc_parser_accepts_known_shapes_and_rejects_date_marker_as_cursor(self) -> None:

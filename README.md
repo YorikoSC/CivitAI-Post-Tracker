@@ -92,6 +92,8 @@ If the windowed launcher needs troubleshooting, `launch_tracker.bat` remains ava
 build_exe.bat
 ```
 
+The build script creates and uses the project-local `.venv`, installs `requirements.txt`, and runs PyInstaller from that same environment.
+
 2. Open:
 
 ```text
