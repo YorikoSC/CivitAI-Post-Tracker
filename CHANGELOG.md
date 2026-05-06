@@ -1,6 +1,6 @@
 # Changelog
 
-## v10.2.0.2-field-test
+## v10.2.0
 
 ### Added
 - Added an in-app Update Center that checks GitHub releases, compares the current version with the latest public release, opens release notes, and downloads attached ZIP update packages.

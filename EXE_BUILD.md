@@ -42,6 +42,14 @@ Attach this ZIP to the GitHub Release. The in-app Update Center looks for ZIP as
 
 The EXE updater expects a portable package with `CivitAITracker.exe` and `_internal/` in the same app folder. Keep the generated `CivitAITracker-v<version>-win64.zip` naming pattern so the app can distinguish it from source archives.
 
+If GitHub Release assets are unavailable on the target network, upload the same ZIP to a mirror and add this line to the GitHub Release notes:
+
+```text
+Update package mirror: https://example.com/CivitAITracker-v<version>-win64.zip
+```
+
+The EXE Update Center prefers mirror package URLs over GitHub Release assets.
+
 ## What to test after build
 
 1. Launch `CivitAITracker.exe`.

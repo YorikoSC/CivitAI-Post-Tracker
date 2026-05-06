@@ -1,4 +1,4 @@
-# CivitAI Tracker v10.2.0.2-field-test
+# CivitAI Tracker v10.2.0
 
 A local Windows-first desktop utility for tracking CivitAI post performance, exporting CSV snapshots, and generating a runtime-aware HTML dashboard.
 
@@ -8,7 +8,7 @@ v10.1 turns the dashboard into a monitoring workspace: post performance rows, la
 
 v10.1.1 is a patch release focused on reliable source/EXE startup, no-console launching from Explorer, and one-instance-per-folder safety.
 
-v10.2 development starts with a built-in Update Center for checking GitHub releases and downloading portable update packages.
+v10.2 adds a built-in Update Center for checking GitHub releases, downloading portable packages, and applying EXE updates with backups.
 
 ## Features
 
@@ -121,7 +121,7 @@ If GitHub interrupts the in-app ZIP download, open the release page, download th
 If GitHub Release assets are unavailable on a network, add a mirror line to the GitHub Release notes:
 
 ```text
-Update package mirror: https://example.com/CivitAITracker-v10.2.0.2-field-test-win64.zip
+Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
 ```
 
 When a mirror is present, the EXE Update Center will prefer it over the GitHub release asset.

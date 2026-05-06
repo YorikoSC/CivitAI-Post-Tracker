@@ -33,7 +33,7 @@ If the in-app download fails because the connection is interrupted, choose **Ope
 If GitHub Release assets are unavailable on a network, upload the same portable ZIP to another storage provider and add this line to the GitHub Release notes:
 
 ```text
-Update package mirror: https://example.com/CivitAITracker-v10.2.0.2-field-test-win64.zip
+Update package mirror: https://example.com/CivitAITracker-v10.2.0-win64.zip
 ```
 
 The Update Center prefers mirror package links over GitHub release assets.

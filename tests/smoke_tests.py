@@ -103,33 +103,33 @@ class UpdateManagerSmokeTests(unittest.TestCase):
 
     def test_release_notes_can_provide_update_package_mirror(self) -> None:
         mirrors = extract_mirror_assets(
-            "Update package mirror: https://downloads.example.test/CivitAITracker-v10.2.0.2-field-test-win64.zip",
-            "TrackerV10.2.0.2-field-test",
+            "Update package mirror: https://downloads.example.test/CivitAITracker-v10.2.0-win64.zip",
+            "TrackerV10.2.0",
         )
 
         self.assertEqual(len(mirrors), 1)
         self.assertEqual(mirrors[0].source, "mirror")
-        self.assertEqual(mirrors[0].name, "CivitAITracker-v10.2.0.2-field-test-win64.zip")
+        self.assertEqual(mirrors[0].name, "CivitAITracker-v10.2.0-win64.zip")
         self.assertEqual(
             mirrors[0].download_url,
-            "https://downloads.example.test/CivitAITracker-v10.2.0.2-field-test-win64.zip",
+            "https://downloads.example.test/CivitAITracker-v10.2.0-win64.zip",
         )
 
     def test_choose_download_asset_prefers_release_note_mirror(self) -> None:
         info = UpdateInfo(
-            current_version="10.2.0-dev",
-            latest_version="TrackerV10.2.0.2-field-test",
-            latest_tag="TrackerV10.2.0.2-field-test",
-            release_name="Tracker v10.2 field test",
+            current_version="10.1.1",
+            latest_version="TrackerV10.2.0",
+            latest_tag="TrackerV10.2.0",
+            release_name="Tracker v10.2",
             release_url="https://example.test/release",
             release_notes="",
             published_at="",
             prerelease=True,
             update_available=True,
-            assets=(ReleaseAsset("CivitAITracker-v10.2.0.2-field-test-win64.zip", "https://github.test/app.zip", 100),),
+            assets=(ReleaseAsset("CivitAITracker-v10.2.0-win64.zip", "https://github.test/app.zip", 100),),
             mirror_assets=(
                 ReleaseAsset(
-                    "CivitAITracker-v10.2.0.2-field-test-win64-mirror.zip",
+                    "CivitAITracker-v10.2.0-win64-mirror.zip",
                     "https://mirror.example.test/app.zip",
                     source="mirror",
                 ),
