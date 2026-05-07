@@ -792,39 +792,113 @@ class DiagnosticsDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, report: dict):
         super().__init__(master)
         self.title("Diagnostics")
-        self.geometry("820x620")
-        self.minsize(720, 520)
+        self.geometry("860x680")
+        self.minsize(780, 600)
         self.report = report
 
+        self._build()
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _build(self):
         self.configure(bg=APP_BG)
         apply_desktop_theme(self)
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
+        wrapper.columnconfigure(0, weight=1)
+        wrapper.rowconfigure(3, weight=1)
         make_dialog_header(
             wrapper,
             "Diagnostics",
             "Startup checks, paths, configuration, and write access.",
-        ).pack(fill="x")
+        ).grid(row=0, column=0, sticky="ew")
 
-        summary = make_panel(wrapper, "SUMMARY")
-        summary.pack(fill="x", pady=(16, 10))
-        tk.Label(summary, text=startup_check_summary(report), bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 12, "bold"), justify="left").pack(anchor="w", pady=(10, 0))
+        overview = make_panel(wrapper, "OVERVIEW")
+        overview.grid(row=1, column=0, sticky="ew", pady=(16, 10))
+        tk.Label(
+            overview,
+            text=startup_check_summary(self.report),
+            bg=CARD_BG,
+            fg=HEADER_FG,
+            font=("Segoe UI", 15, "bold"),
+            justify="left",
+        ).pack(anchor="w", pady=(10, 0))
+        tk.Label(
+            overview,
+            text="Use the tiles below for a quick health check. The full technical report is kept in Details.",
+            bg=CARD_BG,
+            fg=SUBTEXT_FG,
+            font=("Segoe UI", 10),
+            justify="left",
+            wraplength=760,
+        ).pack(anchor="w", pady=(6, 0))
+
+        checks = make_panel(wrapper, "CHECKS")
+        checks.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
+        grid = tk.Frame(checks, bg=CARD_BG)
+        grid.pack(fill="x", pady=(10, 0))
+        grid.columnconfigure((0, 1, 2), weight=1)
+        self._build_check_tiles(grid)
 
         details = make_panel(wrapper, "DETAILS")
-        details.pack(fill="both", expand=True)
+        details.grid(row=3, column=0, sticky="nsew")
         self.text = ScrolledText(details, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
         self.text.pack(fill="both", expand=True, pady=(10, 0))
-        self.text.insert("1.0", format_startup_self_check(report))
+        self.text.insert("1.0", format_startup_self_check(self.report))
         self.text.configure(state="disabled")
 
         buttons = tk.Frame(wrapper, bg=APP_BG)
-        buttons.pack(fill="x", pady=(10, 0))
+        buttons.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         ttk.Button(buttons, text="Copy to clipboard", command=self._copy, style="Secondary.TButton").pack(side="left")
         ttk.Button(buttons, text="Close", command=self.destroy, style="Primary.TButton").pack(side="right")
 
-        self.transient(master)
-        self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+    def _build_check_tiles(self, parent: tk.Frame):
+        details = self.report.get("details", {})
+        critical = int(self.report.get("critical_count", 0))
+        warnings = int(self.report.get("warning_count", 0))
+        if critical:
+            startup_state = ("Critical", STATUS_ERR, f"{critical} critical / {warnings} warning")
+        elif warnings:
+            startup_state = ("Warning", STATUS_RUN, f"{warnings} warning(s)")
+        else:
+            startup_state = ("Passed", STATUS_OK, "No startup issues found")
+
+        config_exists = details.get("config_exists")
+        username_ready = details.get("username_configured")
+        config_ok = bool(config_exists and username_ready)
+        config_detail = "Saved config and username found" if config_ok else "Open Settings and save the missing profile data"
+
+        rows = [
+            ("Startup", *startup_state),
+            ("Config", "Ready" if config_ok else "Needs setup", STATUS_OK if config_ok else STATUS_RUN, config_detail),
+            self._bool_tile("Runtime folder", details.get("runtime_dir_writable"), "Writable", "Not writable", str(details.get("runtime_dir", "Not available"))),
+            self._bool_tile("Logs", details.get("logs_dir_writable"), "Writable", "Needs attention", str(details.get("logs_dir", "Not available"))),
+            self._bool_tile("Database", details.get("db_parent_writable"), "Writable", "Blocked", str(details.get("db_parent", "Not available"))),
+            self._bool_tile("Dashboard", details.get("dashboard_parent_writable"), "Writable", "Blocked", str(details.get("dashboard_parent", "Not available"))),
+            (
+                "API key",
+                "Available" if details.get("api_key_available") else "Limited mode",
+                STATUS_OK if details.get("api_key_available") else STATUS_RUN,
+                "Authenticated fetches enabled" if details.get("api_key_available") else "Public data only; collections and restricted content may be incomplete",
+            ),
+        ]
+        for idx, (label, value, color, detail) in enumerate(rows):
+            self._make_check_tile(parent, label, value, color, detail, idx // 3, idx % 3)
+
+    def _bool_tile(self, label: str, value, ok_label: str, fail_label: str, detail: str):
+        if value is None:
+            return (label, "Unknown", STATUS_IDLE, detail)
+        if bool(value):
+            return (label, ok_label, STATUS_OK, detail)
+        return (label, fail_label, STATUS_ERR, detail)
+
+    def _make_check_tile(self, parent: tk.Frame, label: str, value: str, color: str, detail: str, row: int, column: int):
+        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=11, highlightthickness=1, highlightbackground=BORDER_FG)
+        tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
+        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Label(tile, text=value, bg=CARD_ALT_BG, fg=color, font=("Segoe UI", 16, "bold"), justify="left").pack(anchor="w", pady=(5, 0))
+        tk.Label(tile, text=detail or "Not available", bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9), justify="left", wraplength=230).pack(anchor="w", pady=(4, 0))
 
     def _copy(self):
         text = format_startup_self_check(self.report)
