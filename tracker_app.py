@@ -115,18 +115,20 @@ from update_manager import (
 )
 
 
-APP_BG = "#101317"
-CARD_BG = "#171b21"
-CARD_ALT_BG = "#12161c"
-HEADER_BG = "#8d1d24"
+APP_BG = "#0b1020"
+CARD_BG = "#121a2f"
+CARD_ALT_BG = "#10182b"
+INPUT_BG = "#0d1528"
+FOOTER_BG = "#090e1b"
 HEADER_FG = "#ffffff"
-SUBTEXT_FG = "#b9c0cb"
-BORDER_FG = "#252b34"
-ACCENT_BG = "#a51f2b"
-STATUS_OK = "#37c871"
-STATUS_RUN = "#f3c969"
-STATUS_ERR = "#e25555"
-STATUS_IDLE = "#7c8a9d"
+SUBTEXT_FG = "#9baacf"
+BORDER_FG = "#263353"
+ACCENT_BG = "#2f6fb3"
+ACCENT_HOVER_BG = "#3d82cf"
+STATUS_OK = "#7ee787"
+STATUS_RUN = "#f2cc60"
+STATUS_ERR = "#ff9b9b"
+STATUS_IDLE = "#9baacf"
 
 
 def _local_display_datetime(value: datetime) -> datetime:
@@ -186,6 +188,147 @@ def format_next_run_time(value: datetime | None, *, now: datetime | None = None)
         else:
             prefix = f"in {rem_minutes}m {rem_seconds:02d}s"
     return f"{prefix} · {local_value.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def apply_desktop_theme(widget: tk.Misc) -> None:
+    style = ttk.Style(widget)
+    try:
+        style.theme_use("clam")
+    except Exception:
+        pass
+
+    style.configure(".", background=APP_BG, foreground=HEADER_FG, font=("Segoe UI", 9))
+    style.configure("TFrame", background=APP_BG, borderwidth=0)
+    style.configure("Card.TFrame", background=CARD_BG, borderwidth=0)
+    style.configure("TLabel", background=APP_BG, foreground=HEADER_FG)
+    style.configure("Muted.TLabel", background=APP_BG, foreground=SUBTEXT_FG)
+    style.configure("Card.TLabel", background=CARD_BG, foreground=HEADER_FG)
+    style.configure("CardMuted.TLabel", background=CARD_BG, foreground=SUBTEXT_FG)
+    style.configure(
+        "TEntry",
+        fieldbackground=INPUT_BG,
+        foreground=HEADER_FG,
+        insertcolor=HEADER_FG,
+        bordercolor=BORDER_FG,
+        lightcolor=BORDER_FG,
+        darkcolor=BORDER_FG,
+        padding=6,
+    )
+    style.map(
+        "TEntry",
+        fieldbackground=[("disabled", "#111827"), ("!disabled", INPUT_BG)],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.configure(
+        "TCombobox",
+        fieldbackground=INPUT_BG,
+        background=INPUT_BG,
+        foreground=HEADER_FG,
+        arrowcolor=SUBTEXT_FG,
+        bordercolor=BORDER_FG,
+        lightcolor=BORDER_FG,
+        darkcolor=BORDER_FG,
+        padding=5,
+    )
+    style.map(
+        "TCombobox",
+        fieldbackground=[("readonly", INPUT_BG), ("disabled", "#111827")],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.configure("TCheckbutton", background=APP_BG, foreground=HEADER_FG, focuscolor=APP_BG)
+    style.configure("TRadiobutton", background=APP_BG, foreground=HEADER_FG, focuscolor=APP_BG)
+    style.map(
+        "TCheckbutton",
+        background=[("active", APP_BG), ("!active", APP_BG)],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.map(
+        "TRadiobutton",
+        background=[("active", APP_BG), ("!active", APP_BG)],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.configure("TNotebook", background=APP_BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
+    style.configure(
+        "TNotebook.Tab",
+        background=CARD_ALT_BG,
+        foreground=SUBTEXT_FG,
+        padding=(12, 8),
+        bordercolor=BORDER_FG,
+        lightcolor=BORDER_FG,
+        darkcolor=BORDER_FG,
+    )
+    style.map(
+        "TNotebook.Tab",
+        background=[("selected", CARD_BG), ("active", "#17233f")],
+        foreground=[("selected", HEADER_FG), ("active", HEADER_FG), ("!selected", SUBTEXT_FG)],
+    )
+    style.configure("Primary.TButton", padding=(14, 9), font=("Segoe UI", 10, "bold"))
+    style.configure("Secondary.TButton", padding=(12, 8), font=("Segoe UI", 9))
+    style.map(
+        "Primary.TButton",
+        foreground=[("disabled", "#7d8795"), ("!disabled", "#ffffff")],
+        background=[("disabled", "#202838"), ("active", ACCENT_HOVER_BG), ("!disabled", ACCENT_BG)],
+    )
+    style.map(
+        "Secondary.TButton",
+        foreground=[("disabled", "#7d8795"), ("!disabled", "#f4f6f8")],
+        background=[("disabled", "#202838"), ("active", "#1b2947"), ("!disabled", "#17233f")],
+    )
+    style.configure(
+        "Horizontal.TProgressbar",
+        background=ACCENT_BG,
+        troughcolor=INPUT_BG,
+        bordercolor=BORDER_FG,
+        lightcolor=ACCENT_BG,
+        darkcolor=ACCENT_BG,
+    )
+
+
+def make_dialog_header(parent: tk.Misc, title: str, subtitle: str) -> tk.Frame:
+    header = tk.Frame(parent, bg=APP_BG, padx=4, pady=4)
+    header.grid_columnconfigure(0, weight=1)
+    tk.Label(header, text=title, bg=APP_BG, fg=HEADER_FG, font=("Segoe UI", 22, "bold")).grid(row=0, column=0, sticky="w")
+    tk.Label(
+        header,
+        text=f"v{APP_VERSION} / {get_execution_mode()}",
+        bg=CARD_ALT_BG,
+        fg=SUBTEXT_FG,
+        font=("Segoe UI", 9, "bold"),
+        padx=10,
+        pady=4,
+    ).grid(row=0, column=1, sticky="e")
+    tk.Label(
+        header,
+        text=subtitle,
+        bg=APP_BG,
+        fg=SUBTEXT_FG,
+        font=("Segoe UI", 10),
+        justify="left",
+    ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+    return header
+
+
+def make_panel(parent: tk.Misc, title: str | None = None, *, padx: int = 16, pady: int = 16) -> tk.Frame:
+    panel = tk.Frame(parent, bg=CARD_BG, padx=padx, pady=pady, highlightthickness=1, highlightbackground=BORDER_FG)
+    if title:
+        tk.Label(panel, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
+    return panel
+
+
+def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, column: int, *, wraplength: int = 220) -> tk.Frame:
+    tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
+    tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
+    tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+    tk.Label(
+        tile,
+        textvariable=var,
+        bg=CARD_ALT_BG,
+        fg=HEADER_FG,
+        font=("Segoe UI", 10),
+        wraplength=wraplength,
+        justify="left",
+    ).pack(anchor="w", pady=(4, 0))
+    return tile
 
 
 def extract_post_id(value: str) -> int | None:
@@ -322,24 +465,21 @@ class SettingsDialog(tk.Toplevel):
 
     def _build(self):
         self.configure(bg=APP_BG)
-        container = ttk.Frame(self, padding=14)
+        apply_desktop_theme(self)
+        container = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         container.pack(fill="both", expand=True)
         container.columnconfigure(0, weight=1)
         container.rowconfigure(1, weight=1)
 
-        header = tk.Frame(container, bg=HEADER_BG, padx=14, pady=14)
+        header = make_dialog_header(
+            container,
+            "Settings",
+            "Configure profile, access, tracking, output, and desktop behavior.",
+        )
         header.grid(row=0, column=0, sticky="ew")
-        tk.Label(header, text="Settings", bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        tk.Label(
-            header,
-            text="Configure your profile, authentication, tracking start point, and app behavior.",
-            bg=HEADER_BG,
-            fg="#f2d6d8",
-            font=("Segoe UI", 9),
-        ).pack(anchor="w", pady=(4, 0))
 
         notebook = ttk.Notebook(container)
-        notebook.grid(row=1, column=0, sticky="nsew", pady=(12, 0))
+        notebook.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
 
         self.profile_tab = self._make_tab(notebook, "Profile")
         self.auth_tab = self._make_tab(notebook, "Authentication")
@@ -362,14 +502,14 @@ class SettingsDialog(tk.Toplevel):
         self._build_output_tab()
         self._build_app_tab()
 
-        footer = ttk.Frame(container)
+        footer = tk.Frame(container, bg=APP_BG)
         footer.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         footer.columnconfigure(0, weight=1)
-        ttk.Label(footer, textvariable=self.status_var, wraplength=620).grid(row=0, column=0, sticky="w")
-        buttons = ttk.Frame(footer)
+        tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
+        buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=0, column=1, sticky="e")
-        ttk.Button(buttons, text="Cancel", command=self.destroy).pack(side="left", padx=(0, 6))
-        ttk.Button(buttons, text="Save", command=self._save).pack(side="left")
+        ttk.Button(buttons, text="Cancel", command=self.destroy, style="Secondary.TButton").pack(side="left", padx=(0, 8))
+        ttk.Button(buttons, text="Save", command=self._save, style="Primary.TButton").pack(side="left")
 
     def _make_tab(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
         frame = ttk.Frame(notebook, padding=16)
@@ -377,7 +517,7 @@ class SettingsDialog(tk.Toplevel):
         return frame
 
     def _add_help(self, parent: ttk.Frame, row: int, text: str) -> int:
-        ttk.Label(parent, text=text, wraplength=520, justify="left").grid(row=row, column=1, sticky="w", pady=(0, 10))
+        ttk.Label(parent, text=text, wraplength=520, justify="left", style="Muted.TLabel").grid(row=row, column=1, sticky="w", pady=(0, 10))
         return row + 1
 
     def _add_entry_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, *, width: int = 40, help_text: str | None = None):
@@ -632,20 +772,31 @@ class DiagnosticsDialog(tk.Toplevel):
         self.minsize(720, 520)
         self.report = report
 
-        wrapper = ttk.Frame(self, padding=14)
+        self.configure(bg=APP_BG)
+        apply_desktop_theme(self)
+        wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
-        ttk.Label(wrapper, text="Startup diagnostics", font=("Segoe UI", 12, "bold")).pack(anchor="w")
-        ttk.Label(wrapper, text=startup_check_summary(report)).pack(anchor="w", pady=(4, 10))
+        make_dialog_header(
+            wrapper,
+            "Diagnostics",
+            "Startup checks, paths, configuration, and write access.",
+        ).pack(fill="x")
 
-        self.text = ScrolledText(wrapper, wrap="word")
-        self.text.pack(fill="both", expand=True)
+        summary = make_panel(wrapper, "SUMMARY")
+        summary.pack(fill="x", pady=(16, 10))
+        tk.Label(summary, text=startup_check_summary(report), bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 12, "bold"), justify="left").pack(anchor="w", pady=(10, 0))
+
+        details = make_panel(wrapper, "DETAILS")
+        details.pack(fill="both", expand=True)
+        self.text = ScrolledText(details, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        self.text.pack(fill="both", expand=True, pady=(10, 0))
         self.text.insert("1.0", format_startup_self_check(report))
         self.text.configure(state="disabled")
 
-        buttons = ttk.Frame(wrapper)
+        buttons = tk.Frame(wrapper, bg=APP_BG)
         buttons.pack(fill="x", pady=(10, 0))
-        ttk.Button(buttons, text="Copy to clipboard", command=self._copy).pack(side="left")
-        ttk.Button(buttons, text="Close", command=self.destroy).pack(side="right")
+        ttk.Button(buttons, text="Copy to clipboard", command=self._copy, style="Secondary.TButton").pack(side="left")
+        ttk.Button(buttons, text="Close", command=self.destroy, style="Primary.TButton").pack(side="right")
 
         self.transient(master)
         self.grab_set()
@@ -688,26 +839,22 @@ class UpdateDialog(tk.Toplevel):
 
     def _build(self):
         self.configure(bg=APP_BG)
-        wrapper = ttk.Frame(self, padding=14)
+        apply_desktop_theme(self)
+        wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
         wrapper.rowconfigure(2, weight=1)
 
-        header = tk.Frame(wrapper, bg=HEADER_BG, padx=14, pady=14)
+        header = make_dialog_header(
+            wrapper,
+            "Updates",
+            "Check releases, download a portable package, and apply EXE updates.",
+        )
         header.grid(row=0, column=0, sticky="ew")
-        tk.Label(header, text="Updates", bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 16, "bold")).pack(anchor="w")
-        tk.Label(
-            header,
-            text="Check GitHub releases and download the latest portable package.",
-            bg=HEADER_BG,
-            fg="#f4d9db",
-            font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(4, 0))
 
-        summary = ttk.Frame(wrapper)
-        summary.grid(row=1, column=0, sticky="ew", pady=(12, 8))
-        summary.columnconfigure(1, weight=1)
-        summary.columnconfigure(3, weight=1)
+        summary = tk.Frame(wrapper, bg=APP_BG)
+        summary.grid(row=1, column=0, sticky="ew", pady=(16, 8))
+        summary.columnconfigure((0, 1, 2, 3), weight=1)
         rows = [
             ("Current version", self.current_var),
             ("Latest release", self.latest_var),
@@ -715,31 +862,32 @@ class UpdateDialog(tk.Toplevel):
             ("Status", self.status_var),
         ]
         for idx, (label, var) in enumerate(rows):
-            row = idx // 2
-            col = (idx % 2) * 2
-            ttk.Label(summary, text=label).grid(row=row, column=col, sticky="w", padx=(0, 8), pady=4)
-            ttk.Label(summary, textvariable=var, wraplength=250).grid(row=row, column=col + 1, sticky="w", pady=4)
+            make_metric_tile(summary, label, var, 0, idx, wraplength=170)
 
-        self.notes_text = ScrolledText(wrapper, height=13, wrap="word")
-        self.notes_text.grid(row=2, column=0, sticky="nsew", pady=(4, 8))
+        notes = make_panel(wrapper, "RELEASE NOTES")
+        notes.grid(row=2, column=0, sticky="nsew", pady=(4, 8))
+        notes.columnconfigure(0, weight=1)
+        notes.rowconfigure(1, weight=1)
+        self.notes_text = ScrolledText(notes, height=13, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
         self._set_notes("Release notes will appear here after the check.")
 
-        progress_row = ttk.Frame(wrapper)
+        progress_row = tk.Frame(wrapper, bg=APP_BG)
         progress_row.grid(row=3, column=0, sticky="ew")
         progress_row.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        ttk.Label(progress_row, textvariable=self.progress_text_var, width=18).grid(row=0, column=1, sticky="e")
+        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
 
-        buttons = ttk.Frame(wrapper)
+        buttons = tk.Frame(wrapper, bg=APP_BG)
         buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
-        self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now)
-        self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled")
-        self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled")
-        self.select_btn = ttk.Button(buttons, text="Select ZIP", command=self.select_local_package)
-        self.apply_btn = ttk.Button(buttons, text="Apply downloaded update", command=self.apply_update, state="disabled")
-        self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads)
-        self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy)
+        self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now, style="Primary.TButton")
+        self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled", style="Secondary.TButton")
+        self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled", style="Secondary.TButton")
+        self.select_btn = ttk.Button(buttons, text="Select ZIP", command=self.select_local_package, style="Secondary.TButton")
+        self.apply_btn = ttk.Button(buttons, text="Apply downloaded update", command=self.apply_update, state="disabled", style="Primary.TButton")
+        self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads, style="Secondary.TButton")
+        self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy, style="Secondary.TButton")
         buttons.columnconfigure(5, weight=1)
         self.check_btn.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
         self.release_btn.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=2)
@@ -1018,23 +1166,7 @@ class TrackerApp(tk.Tk):
             self.after(1800, self._check_updates_on_launch)
 
     def _build_ui(self):
-        style = ttk.Style(self)
-        try:
-            style.theme_use("clam")
-        except Exception:
-            pass
-        style.configure("Primary.TButton", padding=(14, 9), font=("Segoe UI", 10, "bold"))
-        style.configure("Secondary.TButton", padding=(12, 8), font=("Segoe UI", 9))
-        style.map(
-            "Primary.TButton",
-            foreground=[("disabled", "#7d8795"), ("!disabled", "#ffffff")],
-            background=[("disabled", "#323842"), ("active", "#bd2a38"), ("!disabled", ACCENT_BG)],
-        )
-        style.map(
-            "Secondary.TButton",
-            foreground=[("disabled", "#7d8795"), ("!disabled", "#f4f6f8")],
-            background=[("disabled", "#242a33"), ("active", "#343c48"), ("!disabled", "#232932")],
-        )
+        apply_desktop_theme(self)
 
         shell = tk.Frame(self, bg=APP_BG)
         shell.pack(fill="both", expand=True)
@@ -1179,11 +1311,11 @@ class TrackerApp(tk.Tk):
         self.log_text.configure(state="disabled")
 
     def _build_footer(self, shell):
-        footer = tk.Frame(shell, bg="#0c0f13", padx=16, pady=10)
+        footer = tk.Frame(shell, bg=FOOTER_BG, padx=16, pady=10)
         footer.pack(fill="x")
         footer.grid_columnconfigure(0, weight=1)
-        tk.Label(footer, textvariable=self.status_line_var, bg="#0c0f13", fg=SUBTEXT_FG, anchor="w").grid(row=0, column=0, sticky="ew")
-        tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg="#0c0f13", fg=SUBTEXT_FG, anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
+        tk.Label(footer, textvariable=self.status_line_var, bg=FOOTER_BG, fg=SUBTEXT_FG, anchor="w").grid(row=0, column=0, sticky="ew")
+        tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg=FOOTER_BG, fg=SUBTEXT_FG, anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _enqueue_log(self, message: str):
         self.log_queue.put(message)
