@@ -26,6 +26,7 @@ from collection_runtime import compute_collection_mode, normalize_collection_tra
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
 from config_utils import normalize_config
 from engagement_dashboard import render_collection_tables_html
+from tracker_app import format_elapsed_time, format_next_run_time
 from tracker_service import (
     TimezoneHelper,
     build_post_performance_rows,
@@ -51,6 +52,20 @@ from update_manager import (
     validate_portable_update_package,
     version_key,
 )
+
+
+class DesktopStatusFormattingSmokeTests(unittest.TestCase):
+    def test_next_run_time_shows_live_countdown(self) -> None:
+        now = datetime(2026, 5, 7, 12, 0, 0)
+        target = now + timedelta(minutes=2, seconds=5)
+
+        self.assertIn("in 2m 05s", format_next_run_time(target, now=now))
+
+    def test_last_success_time_shows_elapsed_label(self) -> None:
+        now = datetime(2026, 5, 7, 12, 10, 0)
+        last_success = now - timedelta(minutes=4, seconds=30)
+
+        self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
 
 
 class UpdateManagerSmokeTests(unittest.TestCase):

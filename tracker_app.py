@@ -10,7 +10,7 @@ import subprocess
 import sys
 import threading
 import webbrowser
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 
 
@@ -117,13 +117,75 @@ from update_manager import (
 
 APP_BG = "#101317"
 CARD_BG = "#171b21"
+CARD_ALT_BG = "#12161c"
 HEADER_BG = "#8d1d24"
 HEADER_FG = "#ffffff"
 SUBTEXT_FG = "#b9c0cb"
+BORDER_FG = "#252b34"
+ACCENT_BG = "#a51f2b"
 STATUS_OK = "#37c871"
 STATUS_RUN = "#f3c969"
 STATUS_ERR = "#e25555"
 STATUS_IDLE = "#7c8a9d"
+
+
+def _local_display_datetime(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value
+    return value.astimezone()
+
+
+def _matching_now(value: datetime, now: datetime | None = None) -> datetime:
+    if now is not None:
+        if value.tzinfo is not None and now.tzinfo is None:
+            return now.astimezone()
+        if value.tzinfo is None and now.tzinfo is not None:
+            return now.replace(tzinfo=None)
+        return now
+    return datetime.now(value.tzinfo) if value.tzinfo is not None else datetime.now()
+
+
+def _relative_past_label(seconds: int) -> str:
+    seconds = max(0, seconds)
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h {minutes % 60:02d}m ago"
+    days = hours // 24
+    return f"{days}d ago"
+
+
+def format_elapsed_time(value: datetime | None, *, now: datetime | None = None) -> str:
+    if value is None:
+        return "Never"
+    local_value = _local_display_datetime(value)
+    current = _matching_now(local_value, now)
+    seconds = int((current - local_value).total_seconds())
+    if seconds < -30:
+        return f"in {abs(seconds) // 60 + 1} min · {local_value.strftime('%Y-%m-%d %H:%M:%S')}"
+    return f"{_relative_past_label(seconds)} · {local_value.strftime('%Y-%m-%d %H:%M:%S')}"
+
+
+def format_next_run_time(value: datetime | None, *, now: datetime | None = None) -> str:
+    if value is None:
+        return "Not scheduled"
+    local_value = _local_display_datetime(value)
+    current = _matching_now(local_value, now)
+    seconds = int((local_value - current).total_seconds())
+    if seconds <= 0:
+        prefix = "due now"
+    else:
+        minutes, rem_seconds = divmod(seconds, 60)
+        hours, rem_minutes = divmod(minutes, 60)
+        if hours:
+            prefix = f"in {hours}h {rem_minutes:02d}m"
+        else:
+            prefix = f"in {rem_minutes}m {rem_seconds:02d}s"
+    return f"{prefix} · {local_value.strftime('%Y-%m-%d %H:%M:%S')}"
 
 
 def extract_post_id(value: str) -> int | None:
@@ -961,128 +1023,158 @@ class TrackerApp(tk.Tk):
             style.theme_use("clam")
         except Exception:
             pass
+        style.configure("Primary.TButton", padding=(14, 9), font=("Segoe UI", 10, "bold"))
+        style.configure("Secondary.TButton", padding=(12, 8), font=("Segoe UI", 9))
+        style.map(
+            "Primary.TButton",
+            foreground=[("disabled", "#7d8795"), ("!disabled", "#ffffff")],
+            background=[("disabled", "#323842"), ("active", "#bd2a38"), ("!disabled", ACCENT_BG)],
+        )
+        style.map(
+            "Secondary.TButton",
+            foreground=[("disabled", "#7d8795"), ("!disabled", "#f4f6f8")],
+            background=[("disabled", "#242a33"), ("active", "#343c48"), ("!disabled", "#232932")],
+        )
 
         shell = tk.Frame(self, bg=APP_BG)
         shell.pack(fill="both", expand=True)
+        self.status_line_var = tk.StringVar(value="Ready.")
 
-        header = tk.Frame(shell, bg=HEADER_BG, padx=18, pady=16)
+        header = tk.Frame(shell, bg=APP_BG, padx=20, pady=18)
         header.pack(fill="x")
-        tk.Label(header, text=APP_TITLE, bg=HEADER_BG, fg=HEADER_FG, font=("Segoe UI", 18, "bold")).pack(anchor="w")
+        header.grid_columnconfigure(0, weight=1)
+        tk.Label(header, text=APP_NAME, bg=APP_BG, fg=HEADER_FG, font=("Segoe UI", 21, "bold")).grid(row=0, column=0, sticky="w")
         tk.Label(
             header,
-            text="Local post analytics, auto polling, and dashboard generation for CivitAI.",
-            bg=HEADER_BG,
-            fg="#f4d9db",
+            text=f"v{APP_VERSION} / {get_execution_mode()}",
+            bg=CARD_ALT_BG,
+            fg=SUBTEXT_FG,
+            font=("Segoe UI", 9, "bold"),
+            padx=10,
+            pady=4,
+        ).grid(row=0, column=1, sticky="e")
+        tk.Label(
+            header,
+            text="Local creator analytics for posts, collections, and dashboard monitoring.",
+            bg=APP_BG,
+            fg=SUBTEXT_FG,
             font=("Segoe UI", 10),
-        ).pack(anchor="w", pady=(4, 0))
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        body = tk.Frame(shell, bg=APP_BG, padx=16, pady=16)
+        body = tk.Frame(shell, bg=APP_BG, padx=16, pady=10)
         body.pack(fill="both", expand=True)
-        body.grid_rowconfigure(3, weight=1)
-        body.grid_columnconfigure(0, weight=1)
-        body.grid_columnconfigure(1, weight=1)
+        body.grid_rowconfigure(2, weight=1)
+        body.grid_columnconfigure(0, weight=3)
+        body.grid_columnconfigure(1, weight=2)
 
         self._build_status_card(body)
         self._build_actions_card(body)
-        self._build_notes_card(body)
+        self._build_health_card(body)
         self._build_log_card(body)
         self._build_footer(shell)
 
     def _make_card(self, parent, title: str, row: int, column: int, *, columnspan: int = 1, weight: int = 0):
-        frame = tk.Frame(parent, bg=CARD_BG, padx=14, pady=14, highlightthickness=1, highlightbackground="#252b34")
-        frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=6, pady=6)
+        frame = tk.Frame(parent, bg=CARD_BG, padx=16, pady=16, highlightthickness=1, highlightbackground=BORDER_FG)
+        frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=7, pady=7)
         if weight:
             parent.grid_rowconfigure(row, weight=weight)
-        tk.Label(frame, text=title, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 12, "bold")).pack(anchor="w")
+        tk.Label(frame, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
         return frame
 
     def _build_status_card(self, parent):
-        card = self._make_card(parent, "Tracker status", 0, 0)
-        grid = tk.Frame(card, bg=CARD_BG)
-        grid.pack(fill="x", pady=(10, 0))
-        grid.grid_columnconfigure(1, weight=1)
-        grid.grid_columnconfigure(3, weight=1)
-
+        card = self._make_card(parent, "CURRENT STATE", 0, 0)
         self.status_var = tk.StringVar(value="Idle")
         self.last_success_var = tk.StringVar(value="Never")
         self.next_run_var = tk.StringVar(value="Not scheduled")
-        self.last_error_var = tk.StringVar(value="-")
+        self.last_error_var = tk.StringVar(value="No recent errors")
         self.polling_var = tk.StringVar(value="Off")
         self.interval_var = tk.StringVar(value="15 minutes")
         self.version_var = tk.StringVar(value=f"v{APP_VERSION} / {get_execution_mode()}")
-        self.status_dot = tk.Label(grid, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=("Segoe UI", 12, "bold"))
+        self.status_summary_var = tk.StringVar(value="Ready for a manual run.")
 
-        rows = [
-            ("Status", self.status_var, True),
-            ("App version", self.version_var, False),
-            ("Last successful run", self.last_success_var, False),
-            ("Next scheduled run", self.next_run_var, False),
-            ("Auto polling", self.polling_var, False),
-            ("Polling interval", self.interval_var, False),
-            ("Last error", self.last_error_var, False),
-        ]
-        for idx, (label, var, is_status) in enumerate(rows):
-            r = idx // 2
-            c = (idx % 2) * 2
-            tk.Label(grid, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9)).grid(row=r, column=c, sticky="w", pady=4)
-            if is_status:
-                status_wrap = tk.Frame(grid, bg=CARD_BG)
-                status_wrap.grid(row=r, column=c + 1, sticky="w", pady=4)
-                self.status_dot.pack(in_=status_wrap, side="left")
-                tk.Label(status_wrap, textvariable=var, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 10, "bold")).pack(side="left", padx=(6, 0))
-            else:
-                tk.Label(grid, textvariable=var, bg=CARD_BG, fg=HEADER_FG, wraplength=300, justify="left").grid(row=r, column=c + 1, sticky="w", pady=4)
+        hero = tk.Frame(card, bg=CARD_BG)
+        hero.pack(fill="x", pady=(12, 0))
+        self.status_dot = tk.Label(hero, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=("Segoe UI", 22, "bold"))
+        self.status_dot.pack(side="left", anchor="n", padx=(0, 10))
+        text_stack = tk.Frame(hero, bg=CARD_BG)
+        text_stack.pack(side="left", fill="x", expand=True)
+        tk.Label(text_stack, textvariable=self.status_var, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 24, "bold")).pack(anchor="w")
+        tk.Label(
+            text_stack,
+            textvariable=self.status_summary_var,
+            bg=CARD_BG,
+            fg=SUBTEXT_FG,
+            font=("Segoe UI", 10),
+            justify="left",
+            wraplength=520,
+        ).pack(anchor="w", pady=(4, 0))
+
+        quick = tk.Frame(card, bg=CARD_BG)
+        quick.pack(fill="x", pady=(18, 0))
+        quick.grid_columnconfigure((0, 1), weight=1)
+        self._build_status_tile(quick, "Last successful run", self.last_success_var, 0, 0)
+        self._build_status_tile(quick, "Next scheduled run", self.next_run_var, 0, 1)
+
+    def _build_status_tile(self, parent, label: str, var: tk.StringVar, row: int, column: int):
+        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
+        tile.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0 if column == 1 else 6), pady=0)
+        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=("Segoe UI", 10), wraplength=260, justify="left").pack(anchor="w", pady=(4, 0))
 
     def _build_actions_card(self, parent):
-        card = self._make_card(parent, "Quick actions", 0, 1)
+        card = self._make_card(parent, "ACTIONS", 0, 1)
         actions = tk.Frame(card, bg=CARD_BG)
         actions.pack(fill="x", pady=(10, 0))
         actions.grid_columnconfigure((0, 1), weight=1)
 
-        self.run_now_btn = ttk.Button(actions, text="Run now", command=self.run_now)
-        self.start_auto_btn = ttk.Button(actions, text="Start auto polling", command=self.start_auto)
-        self.stop_auto_btn = ttk.Button(actions, text="Stop auto polling", command=self.stop_auto)
-        self.settings_btn = ttk.Button(actions, text="Settings", command=self.open_settings)
-        self.dashboard_btn = ttk.Button(actions, text="Open dashboard", command=self.open_dashboard)
-        self.data_btn = ttk.Button(actions, text="Open data folder", command=self.open_data_folder)
-        self.logs_btn = ttk.Button(actions, text="Open logs", command=self.open_logs)
-        self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics)
-        self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates)
-        self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray)
-        self.exit_btn = ttk.Button(actions, text="Exit app", command=self.exit_app)
+        self.run_now_btn = ttk.Button(actions, text="Run now", command=self.run_now, style="Primary.TButton")
+        self.dashboard_btn = ttk.Button(actions, text="Open dashboard", command=self.open_dashboard, style="Primary.TButton")
+        self.start_auto_btn = ttk.Button(actions, text="Start auto polling", command=self.start_auto, style="Secondary.TButton")
+        self.stop_auto_btn = ttk.Button(actions, text="Stop auto polling", command=self.stop_auto, style="Secondary.TButton")
+        self.settings_btn = ttk.Button(actions, text="Settings", command=self.open_settings, style="Secondary.TButton")
+        self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates, style="Secondary.TButton")
+        self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics, style="Secondary.TButton")
+        self.data_btn = ttk.Button(actions, text="Data folder", command=self.open_data_folder, style="Secondary.TButton")
+        self.logs_btn = ttk.Button(actions, text="Logs", command=self.open_logs, style="Secondary.TButton")
+        self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray, style="Secondary.TButton")
+        self.exit_btn = ttk.Button(actions, text="Exit app", command=self.exit_app, style="Secondary.TButton")
 
-        buttons = [
-            self.run_now_btn,
-            self.start_auto_btn,
-            self.stop_auto_btn,
-            self.settings_btn,
-            self.dashboard_btn,
-            self.data_btn,
-            self.logs_btn,
-            self.diagnostics_btn,
-            self.updates_btn,
-            self.tray_btn,
-            self.exit_btn,
+        layout = [
+            (self.run_now_btn, 0, 0, 1),
+            (self.dashboard_btn, 0, 1, 1),
+            (self.start_auto_btn, 1, 0, 1),
+            (self.stop_auto_btn, 1, 1, 1),
+            (self.settings_btn, 2, 0, 1),
+            (self.updates_btn, 2, 1, 1),
+            (self.diagnostics_btn, 3, 0, 1),
+            (self.data_btn, 3, 1, 1),
+            (self.logs_btn, 4, 0, 1),
+            (self.tray_btn, 4, 1, 1),
+            (self.exit_btn, 5, 0, 2),
         ]
-        for i, btn in enumerate(buttons):
-            btn.grid(row=i // 2, column=i % 2, sticky="ew", padx=4, pady=4)
+        for btn, row, column, columnspan in layout:
+            btn.grid(row=row, column=column, columnspan=columnspan, sticky="ew", padx=4, pady=4)
 
-    def _build_notes_card(self, parent):
-        card = self._make_card(parent, "How it behaves", 1, 0, columnspan=2)
-        notes = [
-            "Closing the window sends the app to the system tray instead of exiting.",
-            "Use Exit app to fully close the tracker.",
-            "Auto polling keeps running while the app is hidden in the tray.",
-            "Timezone must use IANA format, for example Europe/Moscow or America/New_York.",
-            "Use API mode 'red' if you want full visibility for content above PG-13.",
-            "Use Diagnostics if startup, config, or write-path issues are suspected.",
+    def _build_health_card(self, parent):
+        card = self._make_card(parent, "RUN HEALTH", 1, 0, columnspan=2)
+        grid = tk.Frame(card, bg=CARD_BG)
+        grid.pack(fill="x", pady=(10, 0))
+        grid.grid_columnconfigure((0, 1, 2, 3), weight=1)
+        items = [
+            ("Auto polling", self.polling_var),
+            ("Polling interval", self.interval_var),
+            ("App version", self.version_var),
+            ("Last error", self.last_error_var),
         ]
-        for line in notes:
-            tk.Label(card, text="• " + line, bg=CARD_BG, fg=SUBTEXT_FG, anchor="w", justify="left", wraplength=860).pack(fill="x", pady=2)
+        for idx, (label, var) in enumerate(items):
+            tile = tk.Frame(grid, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
+            tile.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5, 0 if idx == len(items) - 1 else 5))
+            tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+            tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=("Segoe UI", 10), wraplength=200, justify="left").pack(anchor="w", pady=(4, 0))
 
     def _build_log_card(self, parent):
-        card = self._make_card(parent, "Activity log", 3, 0, columnspan=2, weight=1)
-        self.log_text = ScrolledText(card, height=18, wrap="word", bg="#0f1318", fg="#dde3eb", insertbackground="#ffffff", relief="flat")
+        card = self._make_card(parent, "ACTIVITY", 2, 0, columnspan=2, weight=1)
+        self.log_text = ScrolledText(card, height=14, wrap="word", bg="#0f1318", fg="#dde3eb", insertbackground="#ffffff", relief="flat")
         self.log_text.pack(fill="both", expand=True, pady=(10, 0))
         self.log_text.configure(state="disabled")
 
@@ -1090,7 +1182,6 @@ class TrackerApp(tk.Tk):
         footer = tk.Frame(shell, bg="#0c0f13", padx=16, pady=10)
         footer.pack(fill="x")
         footer.grid_columnconfigure(0, weight=1)
-        self.status_line_var = tk.StringVar(value="Ready.")
         tk.Label(footer, textvariable=self.status_line_var, bg="#0c0f13", fg=SUBTEXT_FG, anchor="w").grid(row=0, column=0, sticky="ew")
         tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg="#0c0f13", fg=SUBTEXT_FG, anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
 
@@ -1135,9 +1226,17 @@ class TrackerApp(tk.Tk):
         snap = self.runner.snapshot()
         self.status_var.set(snap.status)
         self.status_dot.configure(fg=self._status_color(snap))
-        self.last_success_var.set(snap.last_success_at.strftime("%Y-%m-%d %H:%M:%S") if snap.last_success_at else "Never")
-        self.next_run_var.set(snap.next_run_at.strftime("%Y-%m-%d %H:%M:%S") if snap.next_run_at else "Not scheduled")
-        self.last_error_var.set(snap.last_error or "-")
+        self.last_success_var.set(format_elapsed_time(snap.last_success_at))
+        self.next_run_var.set(format_next_run_time(snap.next_run_at))
+        if snap.is_running:
+            self.status_summary_var.set("Collecting current post data and refreshing the dashboard.")
+        elif snap.status == "Error":
+            self.status_summary_var.set(snap.last_error or "The last run failed. Open Diagnostics for details.")
+        elif snap.auto_polling:
+            self.status_summary_var.set(f"Auto polling is active. Next run {format_next_run_time(snap.next_run_at).split(' · ', 1)[0]}.")
+        else:
+            self.status_summary_var.set("Ready for a manual run.")
+        self.last_error_var.set(snap.last_error or "No recent errors")
         self.polling_var.set("On" if snap.auto_polling else "Off")
         self.interval_var.set(self._read_interval_text())
 
