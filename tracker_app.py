@@ -911,8 +911,8 @@ class UpdateDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
-        self.geometry("820x640")
-        self.minsize(760, 580)
+        self.geometry("900x800")
+        self.minsize(820, 720)
         self.runtime_dir = runtime_dir
         self.execution_mode = execution_mode
         self.open_path = open_path
@@ -944,7 +944,7 @@ class UpdateDialog(tk.Toplevel):
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(3, weight=1)
+        wrapper.rowconfigure(3, weight=1, minsize=340)
 
         header = make_dialog_header(
             wrapper,
@@ -978,7 +978,7 @@ class UpdateDialog(tk.Toplevel):
         notes.columnconfigure(0, weight=1)
         notes.rowconfigure(1, weight=1)
         tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
-        self.notes_text = ScrolledText(notes, height=11, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        self.notes_text = ScrolledText(notes, height=14, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
         self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
         self._set_notes("Release notes will appear here after the check.")
 
@@ -1307,8 +1307,8 @@ class TrackerApp(tk.Tk):
     def __init__(self, minimized: bool = False):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("980x700")
-        self.minsize(920, 620)
+        self.geometry("1040x880")
+        self.minsize(980, 800)
         self.configure(bg=APP_BG)
         self.bundle_dir = get_app_base_dir(__file__)
         self.runtime_dir = get_runtime_data_dir(__file__)
@@ -1382,7 +1382,7 @@ class TrackerApp(tk.Tk):
 
         body = tk.Frame(shell, bg=APP_BG, padx=16, pady=10)
         body.pack(fill="both", expand=True)
-        body.grid_rowconfigure(2, weight=1)
+        body.grid_rowconfigure(2, weight=3, minsize=380)
         body.grid_columnconfigure(0, weight=3)
         body.grid_columnconfigure(1, weight=2)
 
@@ -1492,10 +1492,34 @@ class TrackerApp(tk.Tk):
             tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=("Segoe UI", 10), wraplength=200, justify="left").pack(anchor="w", pady=(4, 0))
 
     def _build_log_card(self, parent):
-        card = self._make_card(parent, "ACTIVITY", 2, 0, columnspan=2, weight=1)
-        self.log_text = ScrolledText(card, height=14, wrap="word", bg="#0f1318", fg="#dde3eb", insertbackground="#ffffff", relief="flat")
-        self.log_text.pack(fill="both", expand=True, pady=(10, 0))
-        self.log_text.configure(state="disabled")
+        card = self._make_card(parent, "ACTIVITY", 2, 0, columnspan=2, weight=3)
+        self.activity_summary_var = tk.StringVar(value="Waiting for tracker activity.")
+        tk.Label(
+            card,
+            textvariable=self.activity_summary_var,
+            bg=CARD_BG,
+            fg=SUBTEXT_FG,
+            font=("Segoe UI", 10),
+            justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+
+        timeline = tk.Frame(card, bg=CARD_BG)
+        timeline.pack(fill="both", expand=True, pady=(10, 0))
+        timeline.columnconfigure(0, weight=1)
+        timeline.rowconfigure(0, weight=1)
+
+        self.activity_canvas = tk.Canvas(timeline, bg=CARD_BG, height=260, highlightthickness=0, borderwidth=0)
+        self.activity_canvas.grid(row=0, column=0, sticky="nsew")
+        scrollbar = ttk.Scrollbar(timeline, orient="vertical", command=self.activity_canvas.yview)
+        scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
+        self.activity_canvas.configure(yscrollcommand=scrollbar.set)
+
+        self.activity_list = tk.Frame(self.activity_canvas, bg=CARD_BG)
+        self.activity_window = self.activity_canvas.create_window((0, 0), window=self.activity_list, anchor="nw")
+        self.activity_items: list[tk.Frame] = []
+        self.activity_canvas.bind("<Configure>", self._resize_activity_list)
+        self.activity_list.bind("<Configure>", lambda _event: self.activity_canvas.configure(scrollregion=self.activity_canvas.bbox("all")))
+        self._append_activity_event("Status", "Tracker window is ready.", STATUS_IDLE)
 
     def _build_footer(self, shell):
         footer = tk.Frame(shell, bg=FOOTER_BG, padx=16, pady=10)
@@ -1510,14 +1534,59 @@ class TrackerApp(tk.Tk):
     def _set_status_line(self, message: str):
         self.status_line_var.set(message)
 
+    def _classify_activity(self, message: str) -> tuple[str, str]:
+        text = message.lower()
+        if any(token in text for token in ("error", "failed", "critical", "invalid", "cannot")):
+            return "Error", STATUS_ERR
+        if any(token in text for token in ("warning", "missing", "limited", "not available")):
+            return "Warning", STATUS_RUN
+        if "update" in text:
+            return "Update", ACCENT_HOVER_BG
+        if any(token in text for token in ("auto polling", "polling", "scheduled")):
+            return "Polling", STATUS_OK
+        if any(token in text for token in ("dashboard", "snapshot", "csv", "collection", "post")):
+            return "Data", STATUS_OK
+        return "Status", STATUS_IDLE
+
+    def _resize_activity_list(self, event):
+        self.activity_canvas.itemconfigure(self.activity_window, width=event.width)
+
+    def _append_activity_event(self, kind: str, message: str, color: str):
+        row = tk.Frame(self.activity_list, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
+        row.pack(fill="x", pady=(0, 8))
+        row.columnconfigure(1, weight=1)
+
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        meta = tk.Frame(row, bg=CARD_ALT_BG)
+        meta.grid(row=0, column=0, sticky="nw", padx=(0, 12))
+        tk.Label(meta, text=timestamp, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
+        tk.Label(meta, text=kind, bg=CARD_ALT_BG, fg=color, font=("Segoe UI", 9, "bold")).pack(anchor="w", pady=(4, 0))
+
+        tk.Label(
+            row,
+            text=message,
+            bg=CARD_ALT_BG,
+            fg=HEADER_FG,
+            font=("Segoe UI", 10),
+            justify="left",
+            wraplength=760,
+        ).grid(row=0, column=1, sticky="ew")
+
+        self.activity_items.append(row)
+        while len(self.activity_items) > 60:
+            old = self.activity_items.pop(0)
+            old.destroy()
+        self.activity_summary_var.set(f"Latest event: {message}")
+        self.activity_canvas.update_idletasks()
+        self.activity_canvas.configure(scrollregion=self.activity_canvas.bbox("all"))
+        self.activity_canvas.yview_moveto(1.0)
+
     def _pump_logs(self):
         try:
             while True:
                 line = self.log_queue.get_nowait()
-                self.log_text.configure(state="normal")
-                self.log_text.insert("end", line + "\n")
-                self.log_text.see("end")
-                self.log_text.configure(state="disabled")
+                kind, color = self._classify_activity(line)
+                self._append_activity_event(kind, line, color)
                 self._set_status_line(line)
         except queue.Empty:
             pass
