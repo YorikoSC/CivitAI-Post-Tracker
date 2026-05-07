@@ -837,8 +837,8 @@ class UpdateDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
-        self.geometry("760x560")
-        self.minsize(720, 520)
+        self.geometry("820x640")
+        self.minsize(760, 580)
         self.runtime_dir = runtime_dir
         self.execution_mode = execution_mode
         self.open_path = open_path
@@ -852,6 +852,9 @@ class UpdateDialog(tk.Toplevel):
         self.current_var = tk.StringVar(value=f"v{APP_VERSION}")
         self.latest_var = tk.StringVar(value="-")
         self.asset_var = tk.StringVar(value="-")
+        self.source_var = tk.StringVar(value="Not checked")
+        self.path_var = tk.StringVar(value="Check for updates to see the available path.")
+        self.notes_hint_var = tk.StringVar(value="Release notes will appear after the check.")
         self.progress_var = tk.DoubleVar(value=0)
         self.progress_text_var = tk.StringVar(value="")
 
@@ -867,7 +870,7 @@ class UpdateDialog(tk.Toplevel):
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(2, weight=1)
+        wrapper.rowconfigure(3, weight=1)
 
         header = make_dialog_header(
             wrapper,
@@ -888,23 +891,32 @@ class UpdateDialog(tk.Toplevel):
         for idx, (label, var) in enumerate(rows):
             make_metric_tile(summary, label, var, 0, idx, wraplength=170)
 
-        notes = make_panel(wrapper, "RELEASE NOTES")
-        notes.grid(row=2, column=0, sticky="nsew", pady=(4, 8))
+        path_panel = make_panel(wrapper, "UPDATE PATH")
+        path_panel.grid(row=2, column=0, sticky="ew", pady=(4, 10))
+        path_grid = tk.Frame(path_panel, bg=CARD_BG)
+        path_grid.pack(fill="x", pady=(10, 0))
+        path_grid.columnconfigure((0, 1), weight=1)
+        make_metric_tile(path_grid, "Package source", self.source_var, 0, 0, wraplength=300)
+        make_metric_tile(path_grid, "Next action", self.path_var, 0, 1, wraplength=300)
+
+        notes = make_panel(wrapper, "WHAT CHANGED")
+        notes.grid(row=3, column=0, sticky="nsew", pady=(4, 8))
         notes.columnconfigure(0, weight=1)
         notes.rowconfigure(1, weight=1)
-        self.notes_text = ScrolledText(notes, height=13, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
+        self.notes_text = ScrolledText(notes, height=11, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
         self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
         self._set_notes("Release notes will appear here after the check.")
 
         progress_row = tk.Frame(wrapper, bg=APP_BG)
-        progress_row.grid(row=3, column=0, sticky="ew")
+        progress_row.grid(row=4, column=0, sticky="ew")
         progress_row.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
         tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
 
         buttons = tk.Frame(wrapper, bg=APP_BG)
-        buttons.grid(row=4, column=0, sticky="ew", pady=(12, 0))
+        buttons.grid(row=5, column=0, sticky="ew", pady=(12, 0))
         self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now, style="Primary.TButton")
         self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled", style="Secondary.TButton")
         self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled", style="Secondary.TButton")
@@ -920,6 +932,12 @@ class UpdateDialog(tk.Toplevel):
         self.apply_btn.grid(row=1, column=0, columnspan=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.downloads_btn.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.close_btn.grid(row=1, column=5, sticky="e", pady=(6, 0))
+
+    def _set_update_path(self, source: str, path: str, hint: str | None = None):
+        self.source_var.set(source)
+        self.path_var.set(path)
+        if hint is not None:
+            self.notes_hint_var.set(hint)
 
     def _set_notes(self, text: str):
         self.notes_text.configure(state="normal")
@@ -964,6 +982,11 @@ class UpdateDialog(tk.Toplevel):
         self.latest_var.set("Checking...")
         self.asset_var.set("-")
         self.status_var.set("Checking for updates...")
+        self._set_update_path(
+            "Checking releases",
+            "Contacting GitHub releases...",
+            "The app is checking the latest published release.",
+        )
         self.progress_var.set(0)
         self.progress_text_var.set("")
         self._set_notes("Checking GitHub releases...")
@@ -992,6 +1015,31 @@ class UpdateDialog(tk.Toplevel):
 
         self.status_var.set("Update available." if info.update_available else "You are up to date.")
         notes = info.release_notes or "No release notes were published for this release."
+        if not info.update_available:
+            self._set_update_path(
+                "No package needed",
+                "You are already running the latest version.",
+                "No action is needed for this installation.",
+            )
+        elif self.execution_mode != "frozen":
+            self._set_update_path(
+                "Source mode",
+                "Update this copy through Git.",
+                "Automatic apply is available only in the packaged EXE build.",
+            )
+        elif self.asset is not None:
+            source_label = "Mirror package" if self.asset.source == "mirror" else "GitHub release asset"
+            self._set_update_path(
+                source_label,
+                "Download the package, then apply it from this window.",
+                "The app will validate the portable ZIP before applying it.",
+            )
+        else:
+            self._set_update_path(
+                "No compatible package",
+                "Open the release page and update manually.",
+                "This release does not expose an auto-applicable portable EXE package.",
+            )
         if info.update_available and self.asset is None:
             if self.execution_mode == "frozen":
                 notes += "\n\nNo compatible portable EXE ZIP is attached to this release. Open the release page and update manually."
@@ -1008,6 +1056,11 @@ class UpdateDialog(tk.Toplevel):
         self.status_var.set("Update check failed.")
         self.latest_var.set("-")
         self.asset_var.set("-")
+        self._set_update_path(
+            "Check failed",
+            "Try again, or open the release page manually.",
+            "The update check did not complete.",
+        )
         self._set_notes(message)
         self._set_busy(False)
 
@@ -1037,6 +1090,12 @@ class UpdateDialog(tk.Toplevel):
         if self.is_busy or self.asset is None:
             return
         self.status_var.set("Downloading package...")
+        source_label = "Mirror package" if self.asset.source == "mirror" else "GitHub release asset"
+        self._set_update_path(
+            source_label,
+            "Downloading package...",
+            "Keep this window open while the package downloads.",
+        )
         self.progress_var.set(0)
         self.progress_text_var.set("")
         self._set_busy(True)
@@ -1075,15 +1134,30 @@ class UpdateDialog(tk.Toplevel):
             try:
                 payload_root = validate_portable_update_package(target)
                 self.downloaded_package_ready = True
+                self._set_update_path(
+                    "Validated package",
+                    "Ready to apply. The app will back up replaced files and restart.",
+                    "The selected ZIP passed the portable package validation.",
+                )
                 self._set_notes(
                     f"{action}:\n{target}\n\nPackage check passed. Payload root: {payload_root}\n\nYou can apply this update automatically in EXE mode. The updater will close {APP_NAME}, keep local runtime data, back up replaced app files, and restart the app."
                 )
             except Exception as exc:
                 self.status_var.set(f"Package {action.lower()} but cannot be applied automatically.")
+                self._set_update_path(
+                    "Package rejected",
+                    "Open the release page and update manually.",
+                    "The selected ZIP is not compatible with automatic EXE updates.",
+                )
                 self._set_notes(
                     f"{action}:\n{target}\n\nThis ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually."
                 )
         else:
+            self._set_update_path(
+                "Source mode",
+                "Use Git to update this copy.",
+                "Downloaded packages are for EXE/manual inspection in source mode.",
+            )
             self._set_notes(
                 f"{action}:\n{target}\n\nSource mode is updated through Git. Use downloaded packages only for EXE/manual inspection."
             )
@@ -1092,6 +1166,11 @@ class UpdateDialog(tk.Toplevel):
     def _download_failed(self, message: str):
         self.status_var.set("Download failed.")
         self.downloaded_package_ready = False
+        self._set_update_path(
+            "Download failed",
+            "Open the release page, download manually, then use Select ZIP.",
+            "Network interruptions can be worked around with a manually selected package.",
+        )
         self._set_notes(
             f"{message}\n\nIf GitHub keeps interrupting the connection, use Open release to download the ZIP in your browser, then choose Select ZIP here."
         )
@@ -1109,6 +1188,11 @@ class UpdateDialog(tk.Toplevel):
         except Exception as exc:
             self.downloaded_package_ready = False
             self.status_var.set("Package cannot be applied automatically.")
+            self._set_update_path(
+                "Package rejected",
+                "Select a compatible portable Windows package.",
+                "The selected ZIP cannot be applied automatically.",
+            )
             self._set_notes(f"This ZIP cannot be applied automatically:\n{exc}\n\nOpen the release page and update manually.")
             self._set_busy(False)
             messagebox.showerror("Updates", str(exc), parent=self)
@@ -1132,6 +1216,11 @@ class UpdateDialog(tk.Toplevel):
             return
 
         self.status_var.set("Applying update...")
+        self._set_update_path(
+            "Applying package",
+            "The updater is running and the app will restart.",
+            "Local runtime data will be preserved while app files are replaced.",
+        )
         self._set_notes(f"Updater started.\n\nLog:\n{log_path}\n\n{APP_NAME} will close now and restart after the update is applied.")
         messagebox.showinfo("Updates", "Updater started. The app will close now.", parent=self)
         master = self.master
