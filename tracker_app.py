@@ -237,6 +237,8 @@ def apply_desktop_theme(widget: tk.Misc) -> None:
     )
     style.configure("TCheckbutton", background=APP_BG, foreground=HEADER_FG, focuscolor=APP_BG)
     style.configure("TRadiobutton", background=APP_BG, foreground=HEADER_FG, focuscolor=APP_BG)
+    style.configure("Card.TCheckbutton", background=CARD_BG, foreground=HEADER_FG, focuscolor=CARD_BG)
+    style.configure("Card.TRadiobutton", background=CARD_BG, foreground=HEADER_FG, focuscolor=CARD_BG)
     style.map(
         "TCheckbutton",
         background=[("active", APP_BG), ("!active", APP_BG)],
@@ -245,6 +247,16 @@ def apply_desktop_theme(widget: tk.Misc) -> None:
     style.map(
         "TRadiobutton",
         background=[("active", APP_BG), ("!active", APP_BG)],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.map(
+        "Card.TCheckbutton",
+        background=[("active", CARD_BG), ("!active", CARD_BG)],
+        foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
+    )
+    style.map(
+        "Card.TRadiobutton",
+        background=[("active", CARD_BG), ("!active", CARD_BG)],
         foreground=[("disabled", "#6f7c93"), ("!disabled", HEADER_FG)],
     )
     style.configure("TNotebook", background=APP_BG, borderwidth=0, tabmargins=(0, 4, 0, 0))
@@ -511,19 +523,25 @@ class SettingsDialog(tk.Toplevel):
         ttk.Button(buttons, text="Cancel", command=self.destroy, style="Secondary.TButton").pack(side="left", padx=(0, 8))
         ttk.Button(buttons, text="Save", command=self._save, style="Primary.TButton").pack(side="left")
 
-    def _make_tab(self, notebook: ttk.Notebook, title: str) -> ttk.Frame:
-        frame = ttk.Frame(notebook, padding=16)
+    def _make_tab(self, notebook: ttk.Notebook, title: str) -> tk.Frame:
+        frame = tk.Frame(notebook, bg=CARD_BG, padx=18, pady=18, highlightthickness=1, highlightbackground=BORDER_FG)
         frame.columnconfigure(1, weight=1)
         return frame
 
-    def _add_help(self, parent: ttk.Frame, row: int, text: str) -> int:
-        ttk.Label(parent, text=text, wraplength=520, justify="left", style="Muted.TLabel").grid(row=row, column=1, sticky="w", pady=(0, 10))
+    def _add_section_intro(self, parent: tk.Frame, row: int, title: str, text: str) -> int:
+        tk.Label(parent, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, columnspan=2, sticky="w")
+        row += 1
+        tk.Label(parent, text=text, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 13, "bold"), justify="left", wraplength=680).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 16))
         return row + 1
 
-    def _add_entry_row(self, parent: ttk.Frame, row: int, label: str, variable: tk.StringVar, *, width: int = 40, help_text: str | None = None):
-        ttk.Label(parent, text=label).grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
+    def _add_help(self, parent: tk.Frame, row: int, text: str) -> int:
+        tk.Label(parent, text=text, bg=CARD_BG, fg=SUBTEXT_FG, wraplength=520, justify="left").grid(row=row, column=1, sticky="w", pady=(0, 12))
+        return row + 1
+
+    def _add_entry_row(self, parent: tk.Frame, row: int, label: str, variable: tk.StringVar, *, width: int = 40, help_text: str | None = None):
+        tk.Label(parent, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         entry = ttk.Entry(parent, textvariable=variable, width=width)
-        entry.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
         if help_text:
             row = self._add_help(parent, row, help_text)
@@ -531,73 +549,76 @@ class SettingsDialog(tk.Toplevel):
 
     def _build_profile_tab(self):
         row = 0
+        row = self._add_section_intro(self.profile_tab, row, "PROFILE", "Creator identity and local timezone used for dashboard timestamps.")
         _, row = self._add_entry_row(self.profile_tab, row, "Username", self.username_var, help_text="Your public CivitAI username.")
         _, row = self._add_entry_row(self.profile_tab, row, "Display name", self.display_name_var, help_text="Optional friendly name used inside the app.")
 
-        ttk.Label(self.profile_tab, text="Timezone").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        tz_row = ttk.Frame(self.profile_tab)
-        tz_row.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        tk.Label(self.profile_tab, text="Timezone", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tz_row = tk.Frame(self.profile_tab, bg=CARD_BG)
+        tz_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         tz_row.columnconfigure(0, weight=1)
         self.timezone_entry = ttk.Entry(tz_row, textvariable=self.timezone_var)
         self.timezone_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(tz_row, text="Examples", command=self._show_timezone_examples).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(tz_row, text="Examples", command=self._show_timezone_examples, style="Secondary.TButton").grid(row=0, column=1, padx=(8, 0))
         row += 1
         self._add_help(self.profile_tab, row, "Use IANA timezone format, for example Europe/Moscow or America/New_York.")
 
     def _build_auth_tab(self):
         row = 0
-        ttk.Label(self.auth_tab, text="Storage mode").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        mode_row = ttk.Frame(self.auth_tab)
-        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 4))
-        ttk.Radiobutton(mode_row, text="Store inside config", variable=self.api_storage_var, value="inline", command=self._toggle_auth_mode).pack(side="left")
-        ttk.Radiobutton(mode_row, text="Store in file", variable=self.api_storage_var, value="file", command=self._toggle_auth_mode).pack(side="left", padx=(12, 0))
+        row = self._add_section_intro(self.auth_tab, row, "ACCESS", "API key is optional, but authenticated access improves coverage for collections and restricted content.")
+        tk.Label(self.auth_tab, text="Storage mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        mode_row = tk.Frame(self.auth_tab, bg=CARD_BG)
+        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
+        ttk.Radiobutton(mode_row, text="Store inside config", variable=self.api_storage_var, value="inline", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left")
+        ttk.Radiobutton(mode_row, text="Store in file", variable=self.api_storage_var, value="file", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left", padx=(14, 0))
         row += 1
         row = self._add_help(self.auth_tab, row, "File mode is safer for sharing configs. The app will create and update the key file automatically.")
 
-        ttk.Label(self.auth_tab, text="API key").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
+        tk.Label(self.auth_tab, text="API key", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         self.api_key_entry = ttk.Entry(self.auth_tab, textvariable=self.api_key_var, show="•")
-        self.api_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        self.api_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
 
-        ttk.Label(self.auth_tab, text="Key file").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        file_row = ttk.Frame(self.auth_tab)
-        file_row.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        tk.Label(self.auth_tab, text="Key file", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        file_row = tk.Frame(self.auth_tab, bg=CARD_BG)
+        file_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         file_row.columnconfigure(0, weight=1)
         self.api_key_file_entry = ttk.Entry(file_row, textvariable=self.api_key_file_var)
         self.api_key_file_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(file_row, text="Browse", command=self._browse_key_file).grid(row=0, column=1, padx=(6, 0))
+        ttk.Button(file_row, text="Browse", command=self._browse_key_file, style="Secondary.TButton").grid(row=0, column=1, padx=(8, 0))
         row += 1
 
-        self.auth_help_label = ttk.Label(self.auth_tab, text="", wraplength=520, justify="left")
+        self.auth_help_label = tk.Label(self.auth_tab, text="", bg=CARD_BG, fg=SUBTEXT_FG, wraplength=520, justify="left")
         self.auth_help_label.grid(row=row, column=1, sticky="w", pady=(0, 10))
 
     def _build_tracking_tab(self):
         row = 0
-        ttk.Label(self.tracking_tab, text="Start mode").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        mode_row = ttk.Frame(self.tracking_tab)
-        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 4))
-        ttk.Radiobutton(mode_row, text="Post ID or URL", variable=self.start_mode_var, value="post_id", command=self._toggle_start_mode).pack(side="left")
-        ttk.Radiobutton(mode_row, text="Date", variable=self.start_mode_var, value="date", command=self._toggle_start_mode).pack(side="left", padx=(12, 0))
+        row = self._add_section_intro(self.tracking_tab, row, "TRACKING WINDOW", "Choose where history starts and how often auto polling checks for new data.")
+        tk.Label(self.tracking_tab, text="Start mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        mode_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
+        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
+        ttk.Radiobutton(mode_row, text="Post ID or URL", variable=self.start_mode_var, value="post_id", command=self._toggle_start_mode, style="Card.TRadiobutton").pack(side="left")
+        ttk.Radiobutton(mode_row, text="Date", variable=self.start_mode_var, value="date", command=self._toggle_start_mode, style="Card.TRadiobutton").pack(side="left", padx=(14, 0))
         row += 1
 
-        ttk.Label(self.tracking_tab, text="Start post").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
+        tk.Label(self.tracking_tab, text="Start post", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         self.start_post_entry = ttk.Entry(self.tracking_tab, textvariable=self.start_post_var)
-        self.start_post_entry.grid(row=row, column=1, sticky="ew", pady=(0, 4))
+        self.start_post_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
         row = self._add_help(self.tracking_tab, row, "Paste a post ID or a full post URL.")
 
-        ttk.Label(self.tracking_tab, text="Start date").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        date_row = ttk.Frame(self.tracking_tab)
-        date_row.grid(row=row, column=1, sticky="w", pady=(0, 4))
+        tk.Label(self.tracking_tab, text="Start date", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        date_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
+        date_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
         self.start_day_entry = ttk.Entry(date_row, textvariable=self.start_day_var, width=4, justify="center")
         self.start_day_entry.pack(side="left")
-        ttk.Label(date_row, text="/").pack(side="left", padx=4)
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
         self.start_month_entry = ttk.Entry(date_row, textvariable=self.start_month_var, width=4, justify="center")
         self.start_month_entry.pack(side="left")
-        ttk.Label(date_row, text="/").pack(side="left", padx=4)
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
         self.start_year_entry = ttk.Entry(date_row, textvariable=self.start_year_var, width=6, justify="center")
         self.start_year_entry.pack(side="left")
-        ttk.Label(date_row, text="  DD / MM / YYYY").pack(side="left", padx=(8, 0))
+        tk.Label(date_row, text="DD / MM / YYYY", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=(10, 0))
         row += 1
         row = self._add_help(self.tracking_tab, row, "Stored internally as YYYY-MM-DD.")
 
@@ -612,35 +633,38 @@ class SettingsDialog(tk.Toplevel):
 
     def _build_api_tab(self):
         row = 0
-        ttk.Label(self.api_tab, text="API mode").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        ttk.Combobox(self.api_tab, textvariable=self.api_mode_var, values=["red", "auto", "com"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 4))
+        row = self._add_section_intro(self.api_tab, row, "CIVITAI ACCESS", "Choose the CivitAI host behavior and visibility level used during collection.")
+        tk.Label(self.api_tab, text="API mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        ttk.Combobox(self.api_tab, textvariable=self.api_mode_var, values=["red", "auto", "com"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
         row = self._add_help(self.api_tab, row, "Use 'red' for full visibility, including content above PG-13.")
         _, row = self._add_entry_row(self.api_tab, row, "View host", self.view_host_var, help_text="Used for links opened from the app and dashboard.")
 
-        ttk.Label(self.api_tab, text="NSFW level").grid(row=row, column=0, sticky="w", pady=(0, 4), padx=(0, 12))
-        ttk.Combobox(self.api_tab, textvariable=self.nsfw_var, values=["None", "Soft", "Mature", "X"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 4))
+        tk.Label(self.api_tab, text="NSFW level", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        ttk.Combobox(self.api_tab, textvariable=self.nsfw_var, values=["None", "Soft", "Mature", "X"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
-        ttk.Checkbutton(self.api_tab, text="Allow REST fallback for image enrichment", variable=self.allow_rest_var).grid(row=row, column=1, sticky="w", pady=(4, 0))
+        ttk.Checkbutton(self.api_tab, text="Allow REST fallback for image enrichment", variable=self.allow_rest_var, style="Card.TCheckbutton").grid(row=row, column=1, sticky="w", pady=(6, 0))
 
     def _build_output_tab(self):
         row = 0
+        row = self._add_section_intro(self.output_tab, row, "LOCAL OUTPUT", "Local files generated and maintained by the tracker.")
         _, row = self._add_entry_row(self.output_tab, row, "Database", self.db_var, help_text="SQLite database file used to store snapshots and history.")
         _, row = self._add_entry_row(self.output_tab, row, "CSV directory", self.csv_var, help_text="Folder where CSV exports are generated.")
         _, row = self._add_entry_row(self.output_tab, row, "Dashboard HTML", self.html_var, help_text="The local dashboard file generated by the tracker.")
 
     def _build_app_tab(self):
         row = 0
-        ttk.Checkbutton(self.app_tab, text="Launch with Windows", variable=self.launch_with_windows_var).grid(row=row, column=1, sticky="w")
+        row = self._add_section_intro(self.app_tab, row, "DESKTOP BEHAVIOR", "Startup, tray, and update-check behavior for this local copy.")
+        ttk.Checkbutton(self.app_tab, text="Launch with Windows", variable=self.launch_with_windows_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Start the app automatically when Windows starts.")
-        ttk.Checkbutton(self.app_tab, text="Start minimized to tray", variable=self.start_minimized_var).grid(row=row, column=1, sticky="w")
+        ttk.Checkbutton(self.app_tab, text="Start minimized to tray", variable=self.start_minimized_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Launch hidden and stay in the system tray until opened.")
-        ttk.Checkbutton(self.app_tab, text="Start auto polling on launch", variable=self.start_auto_polling_on_launch_var).grid(row=row, column=1, sticky="w")
+        ttk.Checkbutton(self.app_tab, text="Start auto polling on launch", variable=self.start_auto_polling_on_launch_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Automatically start background polling when the app launches. Recommended for startup and tray-only use.")
-        ttk.Checkbutton(self.app_tab, text="Check for updates on launch", variable=self.check_updates_on_launch_var).grid(row=row, column=1, sticky="w")
+        ttk.Checkbutton(self.app_tab, text="Check for updates on launch", variable=self.check_updates_on_launch_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts.")
         self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use Exit app or the tray menu to exit fully.")
