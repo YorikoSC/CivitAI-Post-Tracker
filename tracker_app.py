@@ -466,7 +466,7 @@ class SettingsDialog(tk.Toplevel):
         self.csv_var = tk.StringVar(value=deep_get(config, "paths.csv_dir", "csv"))
         self.html_var = tk.StringVar(value=deep_get(config, "paths.html", "dashboard.html"))
 
-        self.status_var = tk.StringVar(value="Fill in your settings and click Save.")
+        self.status_var = tk.StringVar(value="Review settings, then save changes.")
 
         self._build()
         self._toggle_auth_mode()
@@ -494,18 +494,18 @@ class SettingsDialog(tk.Toplevel):
         notebook.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
 
         self.profile_tab = self._make_tab(notebook, "Profile")
-        self.auth_tab = self._make_tab(notebook, "Authentication")
+        self.auth_tab = self._make_tab(notebook, "Access")
         self.tracking_tab = self._make_tab(notebook, "Tracking")
-        self.api_tab = self._make_tab(notebook, "API")
-        self.output_tab = self._make_tab(notebook, "Output")
-        self.app_tab = self._make_tab(notebook, "Application")
+        self.api_tab = self._make_tab(notebook, "CivitAI")
+        self.output_tab = self._make_tab(notebook, "Files")
+        self.app_tab = self._make_tab(notebook, "App")
 
         notebook.add(self.profile_tab, text="Profile")
-        notebook.add(self.auth_tab, text="Authentication")
+        notebook.add(self.auth_tab, text="Access")
         notebook.add(self.tracking_tab, text="Tracking")
-        notebook.add(self.api_tab, text="API")
-        notebook.add(self.output_tab, text="Output")
-        notebook.add(self.app_tab, text="Application")
+        notebook.add(self.api_tab, text="CivitAI")
+        notebook.add(self.output_tab, text="Files")
+        notebook.add(self.app_tab, text="App")
 
         self._build_profile_tab()
         self._build_auth_tab()
@@ -565,14 +565,14 @@ class SettingsDialog(tk.Toplevel):
 
     def _build_auth_tab(self):
         row = 0
-        row = self._add_section_intro(self.auth_tab, row, "ACCESS", "API key is optional, but authenticated access improves coverage for collections and restricted content.")
-        tk.Label(self.auth_tab, text="Storage mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        row = self._add_section_intro(self.auth_tab, row, "ACCESS", "A CivitAI key is optional. Without it, the tracker stays in limited public mode.")
+        tk.Label(self.auth_tab, text="Key storage", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         mode_row = tk.Frame(self.auth_tab, bg=CARD_BG)
         mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
         ttk.Radiobutton(mode_row, text="Store inside config", variable=self.api_storage_var, value="inline", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left")
         ttk.Radiobutton(mode_row, text="Store in file", variable=self.api_storage_var, value="file", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left", padx=(14, 0))
         row += 1
-        row = self._add_help(self.auth_tab, row, "File mode is safer for sharing configs. The app will create and update the key file automatically.")
+        row = self._add_help(self.auth_tab, row, "File mode is safer when you share or back up configs. The app will create and update the key file automatically.")
 
         tk.Label(self.auth_tab, text="API key", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         self.api_key_entry = ttk.Entry(self.auth_tab, textvariable=self.api_key_var, show="•")
@@ -633,24 +633,24 @@ class SettingsDialog(tk.Toplevel):
 
     def _build_api_tab(self):
         row = 0
-        row = self._add_section_intro(self.api_tab, row, "CIVITAI ACCESS", "Choose the CivitAI host behavior and visibility level used during collection.")
-        tk.Label(self.api_tab, text="API mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        row = self._add_section_intro(self.api_tab, row, "CIVITAI", "Choose which CivitAI host and visibility level the tracker should use.")
+        tk.Label(self.api_tab, text="Content host", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         ttk.Combobox(self.api_tab, textvariable=self.api_mode_var, values=["red", "auto", "com"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
         row = self._add_help(self.api_tab, row, "Use 'red' for full visibility, including content above PG-13.")
-        _, row = self._add_entry_row(self.api_tab, row, "View host", self.view_host_var, help_text="Used for links opened from the app and dashboard.")
+        _, row = self._add_entry_row(self.api_tab, row, "Open links on", self.view_host_var, help_text="Used for links opened from the app and dashboard.")
 
-        tk.Label(self.api_tab, text="NSFW level", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.api_tab, text="Visibility", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         ttk.Combobox(self.api_tab, textvariable=self.nsfw_var, values=["None", "Soft", "Mature", "X"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
-        ttk.Checkbutton(self.api_tab, text="Allow REST fallback for image enrichment", variable=self.allow_rest_var, style="Card.TCheckbutton").grid(row=row, column=1, sticky="w", pady=(6, 0))
+        ttk.Checkbutton(self.api_tab, text="Try alternate image lookup when previews are missing", variable=self.allow_rest_var, style="Card.TCheckbutton").grid(row=row, column=1, sticky="w", pady=(6, 0))
 
     def _build_output_tab(self):
         row = 0
-        row = self._add_section_intro(self.output_tab, row, "LOCAL OUTPUT", "Local files generated and maintained by the tracker.")
-        _, row = self._add_entry_row(self.output_tab, row, "Database", self.db_var, help_text="SQLite database file used to store snapshots and history.")
-        _, row = self._add_entry_row(self.output_tab, row, "CSV directory", self.csv_var, help_text="Folder where CSV exports are generated.")
-        _, row = self._add_entry_row(self.output_tab, row, "Dashboard HTML", self.html_var, help_text="The local dashboard file generated by the tracker.")
+        row = self._add_section_intro(self.output_tab, row, "LOCAL FILES", "Local files generated and maintained by the tracker.")
+        _, row = self._add_entry_row(self.output_tab, row, "History database", self.db_var, help_text="SQLite file used to store snapshots and history.")
+        _, row = self._add_entry_row(self.output_tab, row, "CSV export folder", self.csv_var, help_text="Folder where CSV exports are generated.")
+        _, row = self._add_entry_row(self.output_tab, row, "Dashboard file", self.html_var, help_text="The local HTML dashboard generated by the tracker.")
 
     def _build_app_tab(self):
         row = 0
@@ -911,8 +911,8 @@ class UpdateDialog(tk.Toplevel):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
-        self.geometry("900x800")
-        self.minsize(820, 720)
+        self.geometry("900x760")
+        self.minsize(820, 660)
         self.runtime_dir = runtime_dir
         self.execution_mode = execution_mode
         self.open_path = open_path
@@ -944,7 +944,7 @@ class UpdateDialog(tk.Toplevel):
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(3, weight=1, minsize=340)
+        wrapper.rowconfigure(5, weight=1, minsize=240)
 
         header = make_dialog_header(
             wrapper,
@@ -973,24 +973,8 @@ class UpdateDialog(tk.Toplevel):
         make_metric_tile(path_grid, "Package source", self.source_var, 0, 0, wraplength=300)
         make_metric_tile(path_grid, "Next action", self.path_var, 0, 1, wraplength=300)
 
-        notes = make_panel(wrapper, "WHAT CHANGED")
-        notes.grid(row=3, column=0, sticky="nsew", pady=(4, 8))
-        notes.columnconfigure(0, weight=1)
-        notes.rowconfigure(1, weight=1)
-        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
-        self.notes_text = ScrolledText(notes, height=14, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
-        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
-        self._set_notes("Release notes will appear here after the check.")
-
-        progress_row = tk.Frame(wrapper, bg=APP_BG)
-        progress_row.grid(row=4, column=0, sticky="ew")
-        progress_row.columnconfigure(0, weight=1)
-        self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
-        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
-
         buttons = tk.Frame(wrapper, bg=APP_BG)
-        buttons.grid(row=5, column=0, sticky="ew", pady=(12, 0))
+        buttons.grid(row=3, column=0, sticky="ew", pady=(4, 10))
         self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now, style="Primary.TButton")
         self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled", style="Secondary.TButton")
         self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled", style="Secondary.TButton")
@@ -1006,6 +990,22 @@ class UpdateDialog(tk.Toplevel):
         self.apply_btn.grid(row=1, column=0, columnspan=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.downloads_btn.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.close_btn.grid(row=1, column=5, sticky="e", pady=(6, 0))
+
+        progress_row = tk.Frame(wrapper, bg=APP_BG)
+        progress_row.grid(row=4, column=0, sticky="ew")
+        progress_row.columnconfigure(0, weight=1)
+        self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
+        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
+
+        notes = make_panel(wrapper, "WHAT CHANGED")
+        notes.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
+        notes.columnconfigure(0, weight=1)
+        notes.rowconfigure(1, weight=1)
+        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
+        self.notes_text = ScrolledText(notes, height=10, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
+        self._set_notes("Release notes will appear here after the check.")
 
     def _set_update_path(self, source: str, path: str, hint: str | None = None):
         self.source_var.set(source)
@@ -1412,44 +1412,44 @@ class TrackerApp(tk.Tk):
         self.status_summary_var = tk.StringVar(value="Ready for a manual run.")
 
         hero = tk.Frame(card, bg=CARD_BG)
-        hero.pack(fill="x", pady=(12, 0))
-        self.status_dot = tk.Label(hero, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=("Segoe UI", 22, "bold"))
-        self.status_dot.pack(side="left", anchor="n", padx=(0, 10))
+        hero.pack(fill="x", pady=(8, 0))
+        self.status_dot = tk.Label(hero, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=("Segoe UI", 16, "bold"))
+        self.status_dot.pack(side="left", anchor="n", padx=(0, 9))
         text_stack = tk.Frame(hero, bg=CARD_BG)
         text_stack.pack(side="left", fill="x", expand=True)
-        tk.Label(text_stack, textvariable=self.status_var, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 24, "bold")).pack(anchor="w")
+        tk.Label(text_stack, textvariable=self.status_var, bg=CARD_BG, fg=HEADER_FG, font=("Segoe UI", 18, "bold")).pack(anchor="w")
         tk.Label(
             text_stack,
             textvariable=self.status_summary_var,
             bg=CARD_BG,
             fg=SUBTEXT_FG,
-            font=("Segoe UI", 10),
+            font=("Segoe UI", 9),
             justify="left",
             wraplength=520,
-        ).pack(anchor="w", pady=(4, 0))
+        ).pack(anchor="w", pady=(2, 0))
 
         quick = tk.Frame(card, bg=CARD_BG)
-        quick.pack(fill="x", pady=(18, 0))
+        quick.pack(fill="x", pady=(10, 0))
         quick.grid_columnconfigure((0, 1), weight=1)
         self._build_status_tile(quick, "Last successful run", self.last_success_var, 0, 0)
         self._build_status_tile(quick, "Next scheduled run", self.next_run_var, 0, 1)
 
     def _build_status_tile(self, parent, label: str, var: tk.StringVar, row: int, column: int):
-        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
+        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=10, pady=8, highlightthickness=1, highlightbackground=BORDER_FG)
         tile.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0 if column == 1 else 6), pady=0)
         tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
-        tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=("Segoe UI", 10), wraplength=260, justify="left").pack(anchor="w", pady=(4, 0))
+        tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=("Segoe UI", 9), wraplength=260, justify="left").pack(anchor="w", pady=(3, 0))
 
     def _build_actions_card(self, parent):
         card = self._make_card(parent, "ACTIONS", 0, 1)
         actions = tk.Frame(card, bg=CARD_BG)
         actions.pack(fill="x", pady=(10, 0))
-        actions.grid_columnconfigure((0, 1), weight=1)
+        actions.grid_columnconfigure((0, 1, 2), weight=1)
 
         self.run_now_btn = ttk.Button(actions, text="Run now", command=self.run_now, style="Primary.TButton")
         self.dashboard_btn = ttk.Button(actions, text="Open dashboard", command=self.open_dashboard, style="Primary.TButton")
-        self.start_auto_btn = ttk.Button(actions, text="Start auto polling", command=self.start_auto, style="Secondary.TButton")
-        self.stop_auto_btn = ttk.Button(actions, text="Stop auto polling", command=self.stop_auto, style="Secondary.TButton")
+        self.start_auto_btn = ttk.Button(actions, text="Start auto", command=self.start_auto, style="Secondary.TButton")
+        self.stop_auto_btn = ttk.Button(actions, text="Stop auto", command=self.stop_auto, style="Secondary.TButton")
         self.settings_btn = ttk.Button(actions, text="Settings", command=self.open_settings, style="Secondary.TButton")
         self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates, style="Secondary.TButton")
         self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics, style="Secondary.TButton")
@@ -1460,16 +1460,16 @@ class TrackerApp(tk.Tk):
 
         layout = [
             (self.run_now_btn, 0, 0, 1),
-            (self.dashboard_btn, 0, 1, 1),
+            (self.dashboard_btn, 0, 1, 2),
             (self.start_auto_btn, 1, 0, 1),
             (self.stop_auto_btn, 1, 1, 1),
-            (self.settings_btn, 2, 0, 1),
-            (self.updates_btn, 2, 1, 1),
-            (self.diagnostics_btn, 3, 0, 1),
-            (self.data_btn, 3, 1, 1),
-            (self.logs_btn, 4, 0, 1),
-            (self.tray_btn, 4, 1, 1),
-            (self.exit_btn, 5, 0, 2),
+            (self.settings_btn, 1, 2, 1),
+            (self.updates_btn, 2, 0, 1),
+            (self.diagnostics_btn, 2, 1, 1),
+            (self.data_btn, 2, 2, 1),
+            (self.logs_btn, 3, 0, 1),
+            (self.tray_btn, 3, 1, 1),
+            (self.exit_btn, 3, 2, 1),
         ]
         for btn, row, column, columnspan in layout:
             btn.grid(row=row, column=column, columnspan=columnspan, sticky="ew", padx=4, pady=4)
