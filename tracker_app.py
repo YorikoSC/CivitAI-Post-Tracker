@@ -74,6 +74,11 @@ from tkinter import filedialog, messagebox, ttk
 from tkinter.scrolledtext import ScrolledText
 
 try:
+    import customtkinter as ctk
+except Exception:  # pragma: no cover
+    ctk = None
+
+try:
     import pystray
     from PIL import Image, ImageDraw
 except Exception:  # pragma: no cover
@@ -129,6 +134,13 @@ STATUS_OK = "#7ee787"
 STATUS_RUN = "#f2cc60"
 STATUS_ERR = "#ff9b9b"
 STATUS_IDLE = "#9baacf"
+CUSTOM_TK_AVAILABLE = ctk is not None
+AppRoot = ctk.CTk if CUSTOM_TK_AVAILABLE else tk.Tk
+DialogWindow = ctk.CTkToplevel if CUSTOM_TK_AVAILABLE else tk.Toplevel
+
+if CUSTOM_TK_AVAILABLE:
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
 
 
 def _local_display_datetime(value: datetime) -> datetime:
@@ -191,6 +203,8 @@ def format_next_run_time(value: datetime | None, *, now: datetime | None = None)
 
 
 def apply_desktop_theme(widget: tk.Misc) -> None:
+    if CUSTOM_TK_AVAILABLE:
+        ctk.set_appearance_mode("dark")
     style = ttk.Style(widget)
     try:
         style.theme_use("clam")
@@ -294,6 +308,126 @@ def apply_desktop_theme(widget: tk.Misc) -> None:
         lightcolor=ACCENT_BG,
         darkcolor=ACCENT_BG,
     )
+
+
+def set_surface_color(widget: tk.Misc, color: str) -> None:
+    if CUSTOM_TK_AVAILABLE and isinstance(widget, (ctk.CTk, ctk.CTkToplevel)):
+        widget.configure(fg_color=color)
+    else:
+        widget.configure(bg=color)
+
+
+def make_button(parent: tk.Misc, text: str, command, *, kind: str = "secondary", state: str = "normal"):
+    if CUSTOM_TK_AVAILABLE:
+        is_primary = kind == "primary"
+        return ctk.CTkButton(
+            parent,
+            text=text,
+            command=command,
+            state=state,
+            width=120,
+            height=36,
+            corner_radius=8,
+            border_width=0 if is_primary else 1,
+            border_color=BORDER_FG,
+            fg_color=ACCENT_BG if is_primary else CARD_ALT_BG,
+            hover_color=ACCENT_HOVER_BG if is_primary else "#1b2947",
+            text_color="#ffffff" if is_primary else "#f4f6f8",
+            font=("Segoe UI", 10 if is_primary else 9, "bold" if is_primary else "normal"),
+        )
+    style = "Primary.TButton" if kind == "primary" else "Secondary.TButton"
+    return ttk.Button(parent, text=text, command=command, state=state, style=style)
+
+
+def make_entry(parent: tk.Misc, variable: tk.StringVar, *, width: int | None = None, show: str | None = None, justify: str | None = None):
+    if CUSTOM_TK_AVAILABLE:
+        pixel_width = max(48, int(width * 9)) if width else 160
+        return ctk.CTkEntry(
+            parent,
+            textvariable=variable,
+            width=pixel_width,
+            height=34,
+            corner_radius=8,
+            border_width=1,
+            border_color=BORDER_FG,
+            fg_color=INPUT_BG,
+            text_color=HEADER_FG,
+            placeholder_text_color=SUBTEXT_FG,
+            show=show,
+            justify=justify or "left",
+            font=("Segoe UI", 10),
+        )
+    options = {"textvariable": variable}
+    if width is not None:
+        options["width"] = width
+    if show is not None:
+        options["show"] = show
+    if justify is not None:
+        options["justify"] = justify
+    return ttk.Entry(parent, **options)
+
+
+def make_combobox(parent: tk.Misc, variable: tk.StringVar, values: list[str], *, width: int = 14):
+    if CUSTOM_TK_AVAILABLE:
+        return ctk.CTkComboBox(
+            parent,
+            variable=variable,
+            values=values,
+            state="readonly",
+            width=max(120, width * 9),
+            height=34,
+            corner_radius=8,
+            border_width=1,
+            border_color=BORDER_FG,
+            fg_color=INPUT_BG,
+            button_color=CARD_ALT_BG,
+            button_hover_color="#1b2947",
+            dropdown_fg_color=INPUT_BG,
+            dropdown_hover_color="#1b2947",
+            dropdown_text_color=HEADER_FG,
+            text_color=HEADER_FG,
+            font=("Segoe UI", 10),
+            dropdown_font=("Segoe UI", 10),
+        )
+    return ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=width)
+
+
+def make_checkbox(parent: tk.Misc, text: str, variable: tk.BooleanVar):
+    if CUSTOM_TK_AVAILABLE:
+        return ctk.CTkCheckBox(
+            parent,
+            text=text,
+            variable=variable,
+            corner_radius=5,
+            border_width=2,
+            fg_color=ACCENT_BG,
+            hover_color=ACCENT_HOVER_BG,
+            border_color=BORDER_FG,
+            text_color=HEADER_FG,
+            font=("Segoe UI", 10),
+        )
+    return ttk.Checkbutton(parent, text=text, variable=variable, style="Card.TCheckbutton")
+
+
+def make_radio(parent: tk.Misc, text: str, variable: tk.StringVar, value: str, command=None):
+    if CUSTOM_TK_AVAILABLE:
+        return ctk.CTkRadioButton(
+            parent,
+            text=text,
+            variable=variable,
+            value=value,
+            command=command,
+            radiobutton_width=17,
+            radiobutton_height=17,
+            border_width_checked=5,
+            border_width_unchecked=2,
+            fg_color=ACCENT_BG,
+            hover_color=ACCENT_HOVER_BG,
+            border_color=BORDER_FG,
+            text_color=HEADER_FG,
+            font=("Segoe UI", 10),
+        )
+    return ttk.Radiobutton(parent, text=text, variable=variable, value=value, command=command, style="Card.TRadiobutton")
 
 
 def make_dialog_header(parent: tk.Misc, title: str, subtitle: str) -> tk.Frame:
@@ -419,7 +553,7 @@ def show_already_running_message(runtime_dir: Path) -> None:
     root.destroy()
 
 
-class SettingsDialog(tk.Toplevel):
+class SettingsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, base_dir: Path, config: dict, on_save):
         super().__init__(master)
         self.title("CivitAI Tracker Settings")
@@ -476,7 +610,7 @@ class SettingsDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
     def _build(self):
-        self.configure(bg=APP_BG)
+        set_surface_color(self, APP_BG)
         apply_desktop_theme(self)
         container = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         container.pack(fill="both", expand=True)
@@ -490,7 +624,22 @@ class SettingsDialog(tk.Toplevel):
         )
         header.grid(row=0, column=0, sticky="ew")
 
-        notebook = ttk.Notebook(container)
+        if CUSTOM_TK_AVAILABLE:
+            notebook = ctk.CTkTabview(
+                container,
+                fg_color=CARD_BG,
+                segmented_button_fg_color=CARD_ALT_BG,
+                segmented_button_selected_color=ACCENT_BG,
+                segmented_button_selected_hover_color=ACCENT_HOVER_BG,
+                segmented_button_unselected_color=CARD_ALT_BG,
+                segmented_button_unselected_hover_color="#1b2947",
+                text_color=HEADER_FG,
+                corner_radius=12,
+                border_width=1,
+                border_color=BORDER_FG,
+            )
+        else:
+            notebook = ttk.Notebook(container)
         notebook.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
 
         self.profile_tab = self._make_tab(notebook, "Profile")
@@ -499,13 +648,6 @@ class SettingsDialog(tk.Toplevel):
         self.api_tab = self._make_tab(notebook, "CivitAI")
         self.output_tab = self._make_tab(notebook, "Files")
         self.app_tab = self._make_tab(notebook, "App")
-
-        notebook.add(self.profile_tab, text="Profile")
-        notebook.add(self.auth_tab, text="Access")
-        notebook.add(self.tracking_tab, text="Tracking")
-        notebook.add(self.api_tab, text="CivitAI")
-        notebook.add(self.output_tab, text="Files")
-        notebook.add(self.app_tab, text="App")
 
         self._build_profile_tab()
         self._build_auth_tab()
@@ -520,11 +662,16 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
         buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=0, column=1, sticky="e")
-        ttk.Button(buttons, text="Cancel", command=self.destroy, style="Secondary.TButton").pack(side="left", padx=(0, 8))
-        ttk.Button(buttons, text="Save", command=self._save, style="Primary.TButton").pack(side="left")
+        make_button(buttons, "Cancel", self.destroy).pack(side="left", padx=(0, 8))
+        make_button(buttons, "Save", self._save, kind="primary").pack(side="left")
 
-    def _make_tab(self, notebook: ttk.Notebook, title: str) -> tk.Frame:
-        frame = tk.Frame(notebook, bg=CARD_BG, padx=18, pady=18, highlightthickness=1, highlightbackground=BORDER_FG)
+    def _make_tab(self, notebook, title: str) -> tk.Frame:
+        if CUSTOM_TK_AVAILABLE:
+            frame = notebook.add(title)
+            frame.configure(fg_color=CARD_BG)
+        else:
+            frame = tk.Frame(notebook, bg=CARD_BG, padx=18, pady=18, highlightthickness=1, highlightbackground=BORDER_FG)
+            notebook.add(frame, text=title)
         frame.columnconfigure(1, weight=1)
         return frame
 
@@ -540,7 +687,7 @@ class SettingsDialog(tk.Toplevel):
 
     def _add_entry_row(self, parent: tk.Frame, row: int, label: str, variable: tk.StringVar, *, width: int = 40, help_text: str | None = None):
         tk.Label(parent, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
-        entry = ttk.Entry(parent, textvariable=variable, width=width)
+        entry = make_entry(parent, variable, width=width)
         entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
         if help_text:
@@ -557,9 +704,9 @@ class SettingsDialog(tk.Toplevel):
         tz_row = tk.Frame(self.profile_tab, bg=CARD_BG)
         tz_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         tz_row.columnconfigure(0, weight=1)
-        self.timezone_entry = ttk.Entry(tz_row, textvariable=self.timezone_var)
+        self.timezone_entry = make_entry(tz_row, self.timezone_var)
         self.timezone_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(tz_row, text="Examples", command=self._show_timezone_examples, style="Secondary.TButton").grid(row=0, column=1, padx=(8, 0))
+        make_button(tz_row, "Examples", self._show_timezone_examples).grid(row=0, column=1, padx=(8, 0))
         row += 1
         self._add_help(self.profile_tab, row, "Use IANA timezone format, for example Europe/Moscow or America/New_York.")
 
@@ -569,13 +716,13 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(self.auth_tab, text="Key storage", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         mode_row = tk.Frame(self.auth_tab, bg=CARD_BG)
         mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
-        ttk.Radiobutton(mode_row, text="Store inside config", variable=self.api_storage_var, value="inline", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left")
-        ttk.Radiobutton(mode_row, text="Store in file", variable=self.api_storage_var, value="file", command=self._toggle_auth_mode, style="Card.TRadiobutton").pack(side="left", padx=(14, 0))
+        make_radio(mode_row, "Store inside config", self.api_storage_var, "inline", self._toggle_auth_mode).pack(side="left")
+        make_radio(mode_row, "Store in file", self.api_storage_var, "file", self._toggle_auth_mode).pack(side="left", padx=(14, 0))
         row += 1
         row = self._add_help(self.auth_tab, row, "File mode is safer when you share or back up configs. The app will create and update the key file automatically.")
 
         tk.Label(self.auth_tab, text="API key", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
-        self.api_key_entry = ttk.Entry(self.auth_tab, textvariable=self.api_key_var, show="•")
+        self.api_key_entry = make_entry(self.auth_tab, self.api_key_var, show="•")
         self.api_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
 
@@ -583,9 +730,9 @@ class SettingsDialog(tk.Toplevel):
         file_row = tk.Frame(self.auth_tab, bg=CARD_BG)
         file_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         file_row.columnconfigure(0, weight=1)
-        self.api_key_file_entry = ttk.Entry(file_row, textvariable=self.api_key_file_var)
+        self.api_key_file_entry = make_entry(file_row, self.api_key_file_var)
         self.api_key_file_entry.grid(row=0, column=0, sticky="ew")
-        ttk.Button(file_row, text="Browse", command=self._browse_key_file, style="Secondary.TButton").grid(row=0, column=1, padx=(8, 0))
+        make_button(file_row, "Browse", self._browse_key_file).grid(row=0, column=1, padx=(8, 0))
         row += 1
 
         self.auth_help_label = tk.Label(self.auth_tab, text="", bg=CARD_BG, fg=SUBTEXT_FG, wraplength=520, justify="left")
@@ -597,12 +744,12 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(self.tracking_tab, text="Start mode", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         mode_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
         mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
-        ttk.Radiobutton(mode_row, text="Post ID or URL", variable=self.start_mode_var, value="post_id", command=self._toggle_start_mode, style="Card.TRadiobutton").pack(side="left")
-        ttk.Radiobutton(mode_row, text="Date", variable=self.start_mode_var, value="date", command=self._toggle_start_mode, style="Card.TRadiobutton").pack(side="left", padx=(14, 0))
+        make_radio(mode_row, "Post ID or URL", self.start_mode_var, "post_id", self._toggle_start_mode).pack(side="left")
+        make_radio(mode_row, "Date", self.start_mode_var, "date", self._toggle_start_mode).pack(side="left", padx=(14, 0))
         row += 1
 
         tk.Label(self.tracking_tab, text="Start post", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
-        self.start_post_entry = ttk.Entry(self.tracking_tab, textvariable=self.start_post_var)
+        self.start_post_entry = make_entry(self.tracking_tab, self.start_post_var)
         self.start_post_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
         row = self._add_help(self.tracking_tab, row, "Paste a post ID or a full post URL.")
@@ -610,13 +757,13 @@ class SettingsDialog(tk.Toplevel):
         tk.Label(self.tracking_tab, text="Start date", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
         date_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
         date_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
-        self.start_day_entry = ttk.Entry(date_row, textvariable=self.start_day_var, width=4, justify="center")
+        self.start_day_entry = make_entry(date_row, self.start_day_var, width=4, justify="center")
         self.start_day_entry.pack(side="left")
         tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
-        self.start_month_entry = ttk.Entry(date_row, textvariable=self.start_month_var, width=4, justify="center")
+        self.start_month_entry = make_entry(date_row, self.start_month_var, width=4, justify="center")
         self.start_month_entry.pack(side="left")
         tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
-        self.start_year_entry = ttk.Entry(date_row, textvariable=self.start_year_var, width=6, justify="center")
+        self.start_year_entry = make_entry(date_row, self.start_year_var, width=6, justify="center")
         self.start_year_entry.pack(side="left")
         tk.Label(date_row, text="DD / MM / YYYY", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=(10, 0))
         row += 1
@@ -635,15 +782,15 @@ class SettingsDialog(tk.Toplevel):
         row = 0
         row = self._add_section_intro(self.api_tab, row, "CIVITAI", "Choose which CivitAI host and visibility level the tracker should use.")
         tk.Label(self.api_tab, text="Content host", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
-        ttk.Combobox(self.api_tab, textvariable=self.api_mode_var, values=["red", "auto", "com"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
+        make_combobox(self.api_tab, self.api_mode_var, ["red", "auto", "com"], width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
         row = self._add_help(self.api_tab, row, "Use 'red' for full visibility, including content above PG-13.")
         _, row = self._add_entry_row(self.api_tab, row, "Open links on", self.view_host_var, help_text="Used for links opened from the app and dashboard.")
 
         tk.Label(self.api_tab, text="Visibility", bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
-        ttk.Combobox(self.api_tab, textvariable=self.nsfw_var, values=["None", "Soft", "Mature", "X"], state="readonly", width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
+        make_combobox(self.api_tab, self.nsfw_var, ["None", "Soft", "Mature", "X"], width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
-        ttk.Checkbutton(self.api_tab, text="Try alternate image lookup when previews are missing", variable=self.allow_rest_var, style="Card.TCheckbutton").grid(row=row, column=1, sticky="w", pady=(6, 0))
+        make_checkbox(self.api_tab, "Try alternate image lookup when previews are missing", self.allow_rest_var).grid(row=row, column=1, sticky="w", pady=(6, 0))
 
     def _build_output_tab(self):
         row = 0
@@ -655,16 +802,16 @@ class SettingsDialog(tk.Toplevel):
     def _build_app_tab(self):
         row = 0
         row = self._add_section_intro(self.app_tab, row, "DESKTOP BEHAVIOR", "Startup, tray, and update-check behavior for this local copy.")
-        ttk.Checkbutton(self.app_tab, text="Launch with Windows", variable=self.launch_with_windows_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
+        make_checkbox(self.app_tab, "Launch with Windows", self.launch_with_windows_var).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Start the app automatically when Windows starts.")
-        ttk.Checkbutton(self.app_tab, text="Start minimized to tray", variable=self.start_minimized_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
+        make_checkbox(self.app_tab, "Start minimized to tray", self.start_minimized_var).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Launch hidden and stay in the system tray until opened.")
-        ttk.Checkbutton(self.app_tab, text="Start auto polling on launch", variable=self.start_auto_polling_on_launch_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
+        make_checkbox(self.app_tab, "Start auto polling on launch", self.start_auto_polling_on_launch_var).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Automatically start background polling when the app launches. Recommended for startup and tray-only use.")
-        ttk.Checkbutton(self.app_tab, text="Check for updates on launch", variable=self.check_updates_on_launch_var, style="Card.TCheckbutton").grid(row=row, column=0, columnspan=2, sticky="w")
+        make_checkbox(self.app_tab, "Check for updates on launch", self.check_updates_on_launch_var).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
         row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts.")
         self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use Exit app or the tray menu to exit fully.")
@@ -788,7 +935,7 @@ class SettingsDialog(tk.Toplevel):
         self.on_save(cfg)
         self.destroy()
 
-class DiagnosticsDialog(tk.Toplevel):
+class DiagnosticsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, report: dict):
         super().__init__(master)
         self.title("Diagnostics")
@@ -802,7 +949,7 @@ class DiagnosticsDialog(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self.destroy)
 
     def _build(self):
-        self.configure(bg=APP_BG)
+        set_surface_color(self, APP_BG)
         apply_desktop_theme(self)
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
@@ -850,8 +997,8 @@ class DiagnosticsDialog(tk.Toplevel):
 
         buttons = tk.Frame(wrapper, bg=APP_BG)
         buttons.grid(row=4, column=0, sticky="ew", pady=(10, 0))
-        ttk.Button(buttons, text="Copy to clipboard", command=self._copy, style="Secondary.TButton").pack(side="left")
-        ttk.Button(buttons, text="Close", command=self.destroy, style="Primary.TButton").pack(side="right")
+        make_button(buttons, "Copy to clipboard", self._copy).pack(side="left")
+        make_button(buttons, "Close", self.destroy, kind="primary").pack(side="right")
 
     def _build_check_tiles(self, parent: tk.Frame):
         details = self.report.get("details", {})
@@ -907,7 +1054,7 @@ class DiagnosticsDialog(tk.Toplevel):
         self.update_idletasks()
 
 
-class UpdateDialog(tk.Toplevel):
+class UpdateDialog(DialogWindow):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
@@ -939,7 +1086,7 @@ class UpdateDialog(tk.Toplevel):
         self.after(150, self.check_now)
 
     def _build(self):
-        self.configure(bg=APP_BG)
+        set_surface_color(self, APP_BG)
         apply_desktop_theme(self)
         shell = tk.Frame(self, bg=APP_BG)
         shell.pack(fill="both", expand=True)
@@ -998,13 +1145,13 @@ class UpdateDialog(tk.Toplevel):
 
         buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=1, column=0, sticky="ew")
-        self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now, style="Primary.TButton")
-        self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled", style="Secondary.TButton")
-        self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled", style="Secondary.TButton")
-        self.select_btn = ttk.Button(buttons, text="Select ZIP", command=self.select_local_package, style="Secondary.TButton")
-        self.apply_btn = ttk.Button(buttons, text="Apply update", command=self.apply_update, state="disabled", style="Primary.TButton")
-        self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads, style="Secondary.TButton")
-        self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy, style="Secondary.TButton")
+        self.check_btn = make_button(buttons, "Check now", self.check_now, kind="primary")
+        self.release_btn = make_button(buttons, "Open release", self.open_release, state="disabled")
+        self.download_btn = make_button(buttons, "Download package", self.download_update, state="disabled")
+        self.select_btn = make_button(buttons, "Select ZIP", self.select_local_package)
+        self.apply_btn = make_button(buttons, "Apply update", self.apply_update, kind="primary", state="disabled")
+        self.downloads_btn = make_button(buttons, "Open downloads", self.open_downloads)
+        self.close_btn = make_button(buttons, "Close", self.destroy)
         buttons.columnconfigure(5, weight=1)
         self.check_btn.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
         self.release_btn.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=2)
@@ -1310,13 +1457,13 @@ class UpdateDialog(tk.Toplevel):
             master.after(100, master.exit_app)
 
 
-class TrackerApp(tk.Tk):
+class TrackerApp(AppRoot):
     def __init__(self, minimized: bool = False):
         super().__init__()
         self.title(APP_TITLE)
         self.geometry("1040x880")
         self.minsize(980, 800)
-        self.configure(bg=APP_BG)
+        set_surface_color(self, APP_BG)
         self.bundle_dir = get_app_base_dir(__file__)
         self.runtime_dir = get_runtime_data_dir(__file__)
         self.base_dir = self.runtime_dir
@@ -1453,17 +1600,17 @@ class TrackerApp(tk.Tk):
         actions.pack(fill="x", pady=(10, 0))
         actions.grid_columnconfigure((0, 1, 2), weight=1)
 
-        self.run_now_btn = ttk.Button(actions, text="Run now", command=self.run_now, style="Primary.TButton")
-        self.dashboard_btn = ttk.Button(actions, text="Open dashboard", command=self.open_dashboard, style="Primary.TButton")
-        self.start_auto_btn = ttk.Button(actions, text="Start auto", command=self.start_auto, style="Secondary.TButton")
-        self.stop_auto_btn = ttk.Button(actions, text="Stop auto", command=self.stop_auto, style="Secondary.TButton")
-        self.settings_btn = ttk.Button(actions, text="Settings", command=self.open_settings, style="Secondary.TButton")
-        self.updates_btn = ttk.Button(actions, text="Updates", command=self.open_updates, style="Secondary.TButton")
-        self.diagnostics_btn = ttk.Button(actions, text="Diagnostics", command=self.open_diagnostics, style="Secondary.TButton")
-        self.data_btn = ttk.Button(actions, text="Data folder", command=self.open_data_folder, style="Secondary.TButton")
-        self.logs_btn = ttk.Button(actions, text="Logs", command=self.open_logs, style="Secondary.TButton")
-        self.tray_btn = ttk.Button(actions, text="Hide to tray", command=self.hide_to_tray, style="Secondary.TButton")
-        self.exit_btn = ttk.Button(actions, text="Exit app", command=self.exit_app, style="Secondary.TButton")
+        self.run_now_btn = make_button(actions, "Run now", self.run_now, kind="primary")
+        self.dashboard_btn = make_button(actions, "Open dashboard", self.open_dashboard, kind="primary")
+        self.start_auto_btn = make_button(actions, "Start auto", self.start_auto)
+        self.stop_auto_btn = make_button(actions, "Stop auto", self.stop_auto)
+        self.settings_btn = make_button(actions, "Settings", self.open_settings)
+        self.updates_btn = make_button(actions, "Updates", self.open_updates)
+        self.diagnostics_btn = make_button(actions, "Diagnostics", self.open_diagnostics)
+        self.data_btn = make_button(actions, "Data folder", self.open_data_folder)
+        self.logs_btn = make_button(actions, "Logs", self.open_logs)
+        self.tray_btn = make_button(actions, "Hide to tray", self.hide_to_tray)
+        self.exit_btn = make_button(actions, "Exit app", self.exit_app)
 
         layout = [
             (self.run_now_btn, 0, 0, 1),

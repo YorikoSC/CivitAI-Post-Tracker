@@ -480,7 +480,7 @@ def run_startup_self_check(
     if not runtime_ok:
         add_critical(f"Runtime directory is not writable: {runtime_msg}")
 
-    logs_dir = get_default_logs_dir(runtime_dir)
+    logs_dir = runtime_dir / "logs"
     logs_ok, logs_msg = _can_write_to_dir(logs_dir)
     result["details"]["logs_dir"] = str(logs_dir)
     result["details"]["logs_dir_writable"] = logs_ok

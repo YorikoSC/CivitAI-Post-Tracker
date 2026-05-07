@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = [
     'requests',
@@ -13,6 +13,7 @@ hiddenimports = [
     'engagement_dashboard',
 ]
 hiddenimports += collect_submodules('pystray')
+hiddenimports += collect_submodules('customtkinter')
 
 
 a = Analysis(
@@ -24,7 +25,7 @@ a = Analysis(
         ('README.md', '.'),
         ('DASHBOARD_GUIDE.md', '.'),
         ('UPDATE_GUIDE.md', '.'),
-    ],
+    ] + collect_data_files('customtkinter'),
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
