@@ -941,10 +941,16 @@ class UpdateDialog(tk.Toplevel):
     def _build(self):
         self.configure(bg=APP_BG)
         apply_desktop_theme(self)
-        wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
-        wrapper.pack(fill="both", expand=True)
+        shell = tk.Frame(self, bg=APP_BG)
+        shell.pack(fill="both", expand=True)
+
+        footer = tk.Frame(shell, bg=APP_BG, padx=18)
+        footer.pack(side="bottom", fill="x", pady=(0, 18))
+
+        wrapper = tk.Frame(shell, bg=APP_BG, padx=18, pady=18)
+        wrapper.pack(side="top", fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(5, weight=1, minsize=240)
+        wrapper.rowconfigure(3, weight=1, minsize=180)
 
         header = make_dialog_header(
             wrapper,
@@ -973,13 +979,30 @@ class UpdateDialog(tk.Toplevel):
         make_metric_tile(path_grid, "Package source", self.source_var, 0, 0, wraplength=300)
         make_metric_tile(path_grid, "Next action", self.path_var, 0, 1, wraplength=300)
 
-        buttons = tk.Frame(wrapper, bg=APP_BG)
-        buttons.grid(row=3, column=0, sticky="ew", pady=(4, 10))
+        notes = make_panel(wrapper, "WHAT CHANGED")
+        notes.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
+        notes.columnconfigure(0, weight=1)
+        notes.rowconfigure(1, weight=1)
+        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
+        self.notes_text = ScrolledText(notes, height=10, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
+        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
+        self._set_notes("Release notes will appear here after the check.")
+
+        footer.columnconfigure(0, weight=1)
+        progress_row = tk.Frame(footer, bg=APP_BG)
+        progress_row.grid(row=0, column=0, sticky="ew", pady=(0, 10))
+        progress_row.columnconfigure(0, weight=1)
+        self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
+        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
+        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
+
+        buttons = tk.Frame(footer, bg=APP_BG)
+        buttons.grid(row=1, column=0, sticky="ew")
         self.check_btn = ttk.Button(buttons, text="Check now", command=self.check_now, style="Primary.TButton")
         self.release_btn = ttk.Button(buttons, text="Open release", command=self.open_release, state="disabled", style="Secondary.TButton")
         self.download_btn = ttk.Button(buttons, text="Download package", command=self.download_update, state="disabled", style="Secondary.TButton")
         self.select_btn = ttk.Button(buttons, text="Select ZIP", command=self.select_local_package, style="Secondary.TButton")
-        self.apply_btn = ttk.Button(buttons, text="Apply downloaded update", command=self.apply_update, state="disabled", style="Primary.TButton")
+        self.apply_btn = ttk.Button(buttons, text="Apply update", command=self.apply_update, state="disabled", style="Primary.TButton")
         self.downloads_btn = ttk.Button(buttons, text="Open downloads", command=self.open_downloads, style="Secondary.TButton")
         self.close_btn = ttk.Button(buttons, text="Close", command=self.destroy, style="Secondary.TButton")
         buttons.columnconfigure(5, weight=1)
@@ -990,22 +1013,6 @@ class UpdateDialog(tk.Toplevel):
         self.apply_btn.grid(row=1, column=0, columnspan=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.downloads_btn.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(6, 0))
         self.close_btn.grid(row=1, column=5, sticky="e", pady=(6, 0))
-
-        progress_row = tk.Frame(wrapper, bg=APP_BG)
-        progress_row.grid(row=4, column=0, sticky="ew")
-        progress_row.columnconfigure(0, weight=1)
-        self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
-        self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
-
-        notes = make_panel(wrapper, "WHAT CHANGED")
-        notes.grid(row=5, column=0, sticky="nsew", pady=(10, 0))
-        notes.columnconfigure(0, weight=1)
-        notes.rowconfigure(1, weight=1)
-        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
-        self.notes_text = ScrolledText(notes, height=10, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
-        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
-        self._set_notes("Release notes will appear here after the check.")
 
     def _set_update_path(self, source: str, path: str, hint: str | None = None):
         self.source_var.set(source)
