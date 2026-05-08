@@ -89,7 +89,6 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                 cee.event_time,
                 COALESCE(cee.related_image_id, cee.target_id) AS image_id,
                 cee.related_post_id,
-                cee.by_user_id,
                 latest_posts.title,
                 latest_posts.published_at,
                 {preview_select}
@@ -175,11 +174,10 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                     "event_time": row[0],
                     "image_id": row[1],
                     "post_id": row[2],
-                    "by_user_id": row[3],
-                    "title": row[4],
-                    "published_at": row[5],
-                    "thumbnail_url": row[6],
-                    "image_url": row[7],
+                    "title": row[3],
+                    "published_at": row[4],
+                    "thumbnail_url": row[5],
+                    "image_url": row[6],
                 }
                 for row in recent_rows
             ],
@@ -386,7 +384,6 @@ def _collection_table_rows(
             _fmt_time(item.get("event_time"), time_formatter),
             _post_cell(view_host, item.get("post_id"), item.get("title"), item.get("image_id")),
             _image_cell(view_host, item.get("image_id")),
-            _fmt(item.get("by_user_id")),
         ]
         for item in data.get("recent_collection_adds", [])
     ]
@@ -481,7 +478,7 @@ def render_collection_dashboard_section(
             _render_panel_table(
                 "Recent collection adds",
                 "Latest detected additions of your images to collections.",
-                ["Preview", "Time", "Post", "Image ID", "Actor ID"],
+                ["Preview", "Time", "Post", "Image ID"],
                 recent_rows,
                 escape_cells=False,
             )
@@ -528,7 +525,7 @@ def render_collection_tables_html(
             _render_workspace_table(
                 "Recent collection adds",
                 "Latest detected additions of your images to collections.",
-                ["Preview", "Time", "Post", "Image ID", "Actor ID"],
+                ["Preview", "Time", "Post", "Image ID"],
                 recent_rows,
                 escape_cells=False,
             ),

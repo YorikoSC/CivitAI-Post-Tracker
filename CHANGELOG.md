@@ -1,5 +1,10 @@
 # Changelog
 
+## v10.3.1
+
+### Fixed
+- Simplified Dashboard Collections activity rows by removing a low-value event metadata column.
+
 ## v10.3.0
 
 ### Added
