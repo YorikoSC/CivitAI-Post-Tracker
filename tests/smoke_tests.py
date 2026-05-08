@@ -25,7 +25,7 @@ import buzz_ingest
 import update_manager
 from collection_runtime import compute_collection_mode, normalize_collection_tracking_config
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
-from config_utils import normalize_config, run_startup_self_check
+from config_utils import normalize_config, normalize_poll_minutes, run_startup_self_check
 from engagement_dashboard import render_collection_tables_html
 from tracker_app import format_elapsed_time, format_next_run_time
 from tracker_runner import TrackerRunner
@@ -612,6 +612,12 @@ class CollectionConfigSmokeTests(unittest.TestCase):
 
         self.assertTrue(cfg["options"]["check_updates_on_launch"])
 
+    def test_polling_interval_has_respectful_floor(self) -> None:
+        self.assertEqual(normalize_poll_minutes(1), 5)
+        self.assertEqual(normalize_poll_minutes(5), 5)
+        self.assertEqual(normalize_poll_minutes(15), 15)
+        self.assertEqual(normalize_poll_minutes("not-a-number"), 15)
+
 
 class CollectionStateSmokeTests(unittest.TestCase):
     def test_sync_state_round_trip_and_legacy_schema_migration(self) -> None:
@@ -957,7 +963,7 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertIn("/width=450/2001.jpeg", normalized["thumbnail_url"])
         self.assertNotIn("avatars.githubusercontent.com", normalized["thumbnail_url"])
 
-    def test_collection_tables_link_image_only_rows_to_image_page(self) -> None:
+    def test_collection_workspace_renders_cards_and_image_only_links(self) -> None:
         db_path = smoke_path("collection_dashboard", ".db")
         conn = sqlite3.connect(db_path)
         try:
@@ -988,9 +994,29 @@ class DashboardSmokeTests(unittest.TestCase):
                 """
                 INSERT INTO content_engagement_events (
                     event_time, normalized_type, target_id, related_image_id, related_post_id, by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
                 """,
-                (datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "collection_like", 123456, None, None, 42),
+                (
+                    datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "collection_like",
+                    222222,
+                    222222,
+                    1001,
+                    42,
+                    datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "collection_like",
+                    123456,
+                    None,
+                    None,
+                    43,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO post_snapshots (post_id, title, published_at)
+                VALUES (?, ?, ?)
+                """,
+                (1001, "Mapped post", "2026-05-08T10:00:00+00:00"),
             )
             conn.commit()
         finally:
@@ -1005,18 +1031,30 @@ class DashboardSmokeTests(unittest.TestCase):
                 pass
 
         self.assertIn('href="https://civitai.red/images/123456"', rendered)
+        self.assertIn('href="https://civitai.red/posts/1001"', rendered)
         self.assertIn("Collection overview", rendered)
         self.assertIn("Image-only events", rendered)
-        self.assertIn("Recent mapped activity", rendered)
-        self.assertIn("Image-only activity", rendered)
+        self.assertIn("Collection board", rendered)
+        self.assertIn("Recent collection flow", rendered)
+        self.assertIn("Top affected posts", rendered)
+        self.assertIn("Top collected images", rendered)
+        self.assertIn("Image-only queue", rendered)
+        self.assertIn("data-workspace-row", rendered)
+        self.assertIn("data-collection-detail-id", rendered)
+        self.assertIn("data-collection-detail-template", rendered)
+        self.assertLess(rendered.index("Top collected images"), rendered.index("Collection board"))
         self.assertIn("class='preview-link'", rendered)
         self.assertIn("Preview unavailable or restricted", rendered)
         self.assertIn("data-period-all='1'", rendered)
         self.assertIn("data-period-day='1'", rendered)
+        self.assertIn("Mapped to local post", rendered)
+        self.assertIn("This view uses image and post identifiers only.", rendered)
         self.assertIn("Post mapping not found locally", rendered)
         self.assertNotIn("Actor ID", rendered)
         self.assertNotIn("by_user_id", rendered)
         self.assertNotIn("Image not matched", rendered)
+        self.assertNotIn("Recent mapped activity", rendered)
+        self.assertNotIn("<table", rendered)
 
 
 if __name__ == "__main__":

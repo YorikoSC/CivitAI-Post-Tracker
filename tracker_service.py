@@ -20,7 +20,7 @@ from buzz_ingest import run_b2_1_ingest
 from engagement_correlation import run_b2_2_correlation
 from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section, render_collection_tables_html
 
-from config_utils import load_yaml_config, deep_get, choose, read_api_key
+from config_utils import DEFAULT_POLL_MINUTES, load_yaml_config, deep_get, choose, normalize_poll_minutes, read_api_key
 
 try:
     from zoneinfo import ZoneInfo
@@ -31,7 +31,8 @@ DEFAULT_TIMEOUT = 30
 DEFAULT_VIEW_HOST = "https://civitai.red"
 DEFAULT_API_MODE = "red"
 DEFAULT_NSFW_LEVEL = "X"
-DEFAULT_POLL_MINUTES = 15
+DASHBOARD_REFRESH_SECONDS = 300
+REQUEST_PAGE_DELAY_SECONDS = 0.5
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAT_KEYS = ["likeCount", "heartCount", "laughCount", "cryCount", "commentCount"]
 CIVITAI_IMAGE_CACHE_ROOT = "https://imagecache.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
@@ -336,7 +337,7 @@ def fetch_trpc_infinite(
             break
         seen_cursors.add(cursor_key)
         cursor = next_cursor
-        time.sleep(0.15)
+        time.sleep(REQUEST_PAGE_DELAY_SECONDS)
 
     return items
 
@@ -378,7 +379,7 @@ def rest_fetch_images(session: requests.Session, host: str, username: str, timeo
         metadata = data.get("metadata", {}) or {}
         next_url = metadata.get("nextPage")
         if next_url:
-            time.sleep(0.15)
+            time.sleep(REQUEST_PAGE_DELAY_SECONDS)
     return items
 
 
@@ -1581,7 +1582,8 @@ def render_dashboard(
     else:
         tracking_window = "All posts"
 
-    refresh_seconds = 60
+    refresh_seconds = DASHBOARD_REFRESH_SECONDS
+    refresh_label = f"{refresh_seconds // 60} min" if refresh_seconds % 60 == 0 else f"{refresh_seconds}s"
 
     def fmt_runtime_ts(key: str) -> str:
         value = runtime_status.get(key)
@@ -2348,7 +2350,7 @@ def render_dashboard(
         "var hideUnmatched=workspace.querySelector('[data-workspace-hide-unmatched]');"
         "var period=workspace.dataset.workspacePeriod||'all';"
         "var query=((search&&search.value)||'').trim().toLowerCase();"
-        "var rows=Array.from(section.querySelectorAll('tbody tr'));"
+        "var rows=Array.from(section.querySelectorAll('tbody tr,[data-workspace-row]'));"
         "var hasActiveRows=rows.some(function(row){return row.dataset.activeRow==='1';});"
         "var hasPeriodRows=rows.some(function(row){return row.dataset.periodAll==='1'||!!row.querySelector('[data-period-all=\"1\"]');});"
         "function periodMatches(row,value){if(value==='all')return true;var key='period'+value.charAt(0).toUpperCase()+value.slice(1);return row.dataset[key]==='1'||!!row.querySelector('[data-period-'+value+'=\"1\"]');}"
@@ -2394,9 +2396,10 @@ def render_dashboard(
         "var drawer=document.querySelector('[data-post-drawer]');"
         "var drawerContent=document.querySelector('[data-post-drawer-content]');"
         "function closeDrawer(){if(drawer){drawer.hidden=true;document.body.style.overflow='';}}"
-        "function openDrawer(id){"
+        "function openDrawer(id,type){"
         "if(!drawer||!drawerContent)return;"
-        "var tpl=document.querySelector('[data-post-detail-template=\"'+id+'\"]');"
+        "var selector=type==='collection'?'[data-collection-detail-template=\"'+id+'\"]':'[data-post-detail-template=\"'+id+'\"]';"
+        "var tpl=document.querySelector(selector);"
         "if(!tpl)return;"
         "drawerContent.innerHTML=tpl.innerHTML;"
         "drawer.hidden=false;document.body.style.overflow='hidden';"
@@ -2404,8 +2407,13 @@ def render_dashboard(
         "var close=drawer.querySelector('[data-post-drawer-close]'); if(close) close.focus();"
         "}"
         "document.querySelectorAll('[data-post-detail-id]').forEach(function(row){"
-        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.postDetailId);});"
-        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.postDetailId);}});"
+        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.postDetailId,'post');});"
+        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.postDetailId,'post');}});"
+        "row.tabIndex=0;"
+        "});"
+        "document.querySelectorAll('[data-collection-detail-id]').forEach(function(row){"
+        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.collectionDetailId,'collection');});"
+        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.collectionDetailId,'collection');}});"
         "row.tabIndex=0;"
         "});"
         "document.querySelectorAll('[data-post-drawer-close]').forEach(function(button){button.addEventListener('click',closeDrawer);});"
@@ -2417,7 +2425,7 @@ def render_dashboard(
     parts.append(
         "<div class='hero'>"
         f"<div><h1>{html.escape(APP_TITLE)}</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong> · generated {html.escape(tz_helper.fmt_dt(generated_at))}</p></div>"
-        f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
+        f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_label}</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )
 
@@ -2690,7 +2698,7 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
     cfg_start_mode = deep_get(cfg, "tracking.start_mode", "post_id")
     cfg_min_post_id = deep_get(cfg, "tracking.start_post_id")
     cfg_start_date = deep_get(cfg, "tracking.start_date")
-    poll_minutes = deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)
+    poll_minutes = normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
 
     if args.start_date is not None:
         start_mode = "date"
@@ -2842,7 +2850,7 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
     start_mode = deep_get(cfg, "tracking.start_mode", "post_id")
     min_post_id = deep_get(cfg, "tracking.start_post_id") if start_mode != "date" else None
     start_date = deep_get(cfg, "tracking.start_date") if start_mode == "date" else None
-    poll_minutes = deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)
+    poll_minutes = normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
 
     allow_rest_fallback = bool(deep_get(cfg, "options.allow_rest_fallback", False))
     inline_api_key = deep_get(cfg, "auth.api_key")

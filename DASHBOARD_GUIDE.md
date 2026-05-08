@@ -69,13 +69,18 @@ The Collections views show:
 - collection additions;
 - affected images;
 - affected posts;
-- recent collection events;
-- top posts and images by collection additions.
+- a recent collection flow;
+- top affected posts;
+- top collected images;
 - image-only events that are not mapped to a local post yet.
 
 Rows marked `Post mapping not found locally` are image-level events that could not be mapped to a local post in `post_images`. The dashboard still links those rows to the CivitAI image page.
 
 Collection image previews use the same thumbnail-sized slot as normal previews. If a preview URL is missing or blocked by the current browser/session, the fallback opens the image page without shifting the table layout.
+
+The Collections workspace uses compact cards instead of a stack of separate tables. Search, quick period filters, and the image-only toggle still apply to those cards.
+
+Clicking a collection card opens the same detail drawer pattern used by the Performance tab, with image/post links and compact collection context.
 
 ## API Key Effects
 
@@ -88,6 +93,8 @@ Removing the key does not hide rows already stored in the local database. It onl
 Dashboard periods use the configured local timezone.
 
 The header includes a `generated ...` timestamp. If the dashboard looks stale, run the tracker again and confirm that timestamp changed.
+
+The dashboard page auto-refreshes itself every 5 minutes. This reloads the local HTML view; it does not trigger a tracker run or fetch new CivitAI data. Background polling is controlled by the app's polling interval.
 
 ## Limits
 
