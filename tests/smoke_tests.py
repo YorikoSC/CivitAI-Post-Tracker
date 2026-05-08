@@ -831,6 +831,8 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertIn("data-period-all='1'", rendered)
         self.assertIn("data-period-day='1'", rendered)
         self.assertIn("Post mapping not found locally", rendered)
+        self.assertNotIn("Actor ID", rendered)
+        self.assertNotIn("by_user_id", rendered)
         self.assertNotIn("Image not matched", rendered)
 
 
