@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Callable, Optional
 
-from config_utils import deep_get, load_json_config, validate_config
+from config_utils import DEFAULT_POLL_MINUTES, deep_get, load_json_config, normalize_poll_minutes, validate_config
 from tracker_service import refresh_dashboard_from_config, run_collection_once
 
 LogCallback = Callable[[str], None]
@@ -83,12 +83,7 @@ class TrackerRunner:
 
     def _read_poll_minutes(self) -> int:
         cfg = load_json_config(self.config_path)
-        poll = deep_get(cfg, "tracking.poll_minutes", 15)
-        try:
-            poll = int(poll)
-        except Exception:
-            poll = 15
-        return max(1, poll)
+        return normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
 
     def _read_start_mode(self) -> str:
         cfg = load_json_config(self.config_path)

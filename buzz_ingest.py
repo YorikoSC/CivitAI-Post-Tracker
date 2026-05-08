@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import sqlite3
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -28,6 +29,7 @@ import requests
 HOST_RED = "https://civitai.red"
 HOST_COM = "https://civitai.com"
 TRPC_PROC = "buzz.getUserTransactions"
+REQUEST_PAGE_DELAY_SECONDS = 0.5
 CORE_TYPE_MAP = {
     "goodContent:image": "reaction_like",
     "collectedContent:image": "collection_like",
@@ -661,6 +663,7 @@ def _run_transactions_pass(
             stop_reason = "source_exhausted"
             break
         cursor = next_cursor
+        time.sleep(REQUEST_PAGE_DELAY_SECONDS)
     else:
         stop_reason = "page_limit_reached"
 

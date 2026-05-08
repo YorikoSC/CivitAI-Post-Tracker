@@ -130,6 +130,8 @@ The most important settings live in `config.json`:
 
 Collection tracking options are under `collection_tracking`. The default config separates the first bootstrap sync from later maintenance syncs:
 
+Automatic polling is intentionally conservative. The default is 15 minutes, and values below 5 minutes are raised to 5 minutes to avoid overly frequent CivitAI requests. Dashboard auto-refresh reloads the local HTML page every 5 minutes; it does not start a new CivitAI fetch by itself.
+
 ```json
 {
   "collection_tracking": {

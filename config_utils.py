@@ -19,6 +19,8 @@ EXAMPLE_CONFIG_FILE = "config.example.json"
 CURRENT_CONFIG_VERSION = 2
 AUTOSTART_SHORTCUT_NAME = "CivitAI Post Tracker.lnk"
 SOURCE_LAUNCHER_FILE = "launch_tracker.pyw"
+DEFAULT_POLL_MINUTES = 15
+MIN_POLL_MINUTES = 5
 TIMEZONE_EXAMPLES = [
     "UTC",
     "Europe/Moscow",
@@ -26,6 +28,14 @@ TIMEZONE_EXAMPLES = [
     "America/New_York",
     "Asia/Tokyo",
 ]
+
+
+def normalize_poll_minutes(value: Any, default: int = DEFAULT_POLL_MINUTES) -> int:
+    try:
+        minutes = int(value)
+    except Exception:
+        minutes = int(default)
+    return max(MIN_POLL_MINUTES, minutes)
 
 
 def is_frozen_app() -> bool:
@@ -97,7 +107,7 @@ def default_config() -> dict[str, Any]:
             "start_mode": "post_id",
             "start_post_id": None,
             "start_date": None,
-            "poll_minutes": 15,
+            "poll_minutes": DEFAULT_POLL_MINUTES,
         },
         "api": {
             "mode": "red",
@@ -331,7 +341,7 @@ def validate_config(config: dict[str, Any]) -> list[str]:
         if not start_date:
             errors.append("tracking.start_date is required when start_mode is 'date'")
 
-    poll_minutes = deep_get(config, "tracking.poll_minutes", 15)
+    poll_minutes = deep_get(config, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)
     try:
         poll_minutes = int(poll_minutes)
         if poll_minutes <= 0:
@@ -505,11 +515,14 @@ def run_startup_self_check(
         add_warning(timezone_error_message())
 
     try:
-        poll_minutes = int(deep_get(config, "tracking.poll_minutes", 15))
+        poll_minutes = int(deep_get(config, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
         if poll_minutes <= 0:
             raise ValueError
     except Exception:
         add_warning("Polling interval is invalid. Set a positive integer number of minutes.")
+    else:
+        if poll_minutes < MIN_POLL_MINUTES:
+            add_warning(f"Polling interval is below {MIN_POLL_MINUTES} minutes. The app will use {MIN_POLL_MINUTES} minutes to avoid overly frequent requests.")
 
     start_mode = deep_get(config, "tracking.start_mode", "post_id")
     result["details"]["start_mode"] = start_mode
