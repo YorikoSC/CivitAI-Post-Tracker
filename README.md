@@ -206,4 +206,6 @@ If the dashboard looks stale, run the tracker again and check the `generated ...
 - `DASHBOARD_GUIDE.md` - dashboard interpretation and limits.
 - `UPDATE_GUIDE.md` - update and rollback flow.
 - `EXE_BUILD.md` - build and package flow.
+- `SECURITY.md` - vulnerability reporting and sensitive local data.
+- `CONTRIBUTING.md` - issue, development, and pull-request guidance.
 - `CHANGELOG.md` - release history.
