@@ -1,5 +1,17 @@
 # Changelog
 
+## v10.3.0
+
+### Added
+- CustomTkinter-based desktop UI refresh.
+- Bundled Exo 2 and Russo One font assets for consistent app typography.
+
+### Changed
+- Main window layout now keeps Activity and the status footer visible at the default size.
+- Settings, Updates, and Diagnostics use the refreshed UI surfaces, larger readable text, and styled scrollable text areas.
+- Diagnostics now opens with the health details visible without requiring the user to stretch the window.
+- Secondary windows now use larger minimum sizes so important controls are visible on open.
+
 ## v10.2.1
 
 ### Fixed

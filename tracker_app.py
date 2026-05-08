@@ -1682,8 +1682,8 @@ class TrackerApp(AppRoot):
     def __init__(self, minimized: bool = False):
         super().__init__()
         self.title(APP_TITLE)
-        self.geometry("1040x880")
-        self.minsize(980, 800)
+        self.geometry("1080x930")
+        self.minsize(1000, 860)
         set_surface_color(self, APP_BG)
         self.bundle_dir = get_app_base_dir(__file__)
         self.runtime_dir = get_runtime_data_dir(__file__)
@@ -1764,7 +1764,7 @@ class TrackerApp(AppRoot):
         shell.pack(fill="both", expand=True)
         self.status_line_var = tk.StringVar(value="Ready.")
 
-        header = tk.Frame(shell, bg=APP_BG, padx=20, pady=18)
+        header = tk.Frame(shell, bg=APP_BG, padx=20, pady=12)
         header.pack(fill="x")
         header.grid_columnconfigure(0, weight=1)
         tk.Label(header, text=APP_NAME, bg=APP_BG, fg=HEADER_FG, font=ui_font(23, "bold", display=True)).grid(row=0, column=0, sticky="w")
@@ -1785,9 +1785,11 @@ class TrackerApp(AppRoot):
             font=ui_font(12),
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
-        body = tk.Frame(shell, bg=APP_BG, padx=16, pady=10)
+        self._build_footer(shell)
+
+        body = tk.Frame(shell, bg=APP_BG, padx=16, pady=4)
         body.pack(fill="both", expand=True)
-        body.grid_rowconfigure(2, weight=3, minsize=380)
+        body.grid_rowconfigure(2, weight=1, minsize=190)
         body.grid_columnconfigure(0, weight=3)
         body.grid_columnconfigure(1, weight=2)
 
@@ -1795,11 +1797,10 @@ class TrackerApp(AppRoot):
         self._build_actions_card(body)
         self._build_health_card(body)
         self._build_log_card(body)
-        self._build_footer(shell)
 
     def _make_card(self, parent, title: str, row: int, column: int, *, columnspan: int = 1, weight: int = 0):
-        frame = tk.Frame(parent, bg=CARD_BG, padx=16, pady=16, highlightthickness=1, highlightbackground=BORDER_FG)
-        frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=7, pady=7)
+        frame = tk.Frame(parent, bg=CARD_BG, padx=14, pady=14, highlightthickness=1, highlightbackground=BORDER_FG)
+        frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=6, pady=6)
         if weight:
             parent.grid_rowconfigure(row, weight=weight)
         tk.Label(frame, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).pack(anchor="w")
@@ -1913,7 +1914,7 @@ class TrackerApp(AppRoot):
         timeline.columnconfigure(0, weight=1)
         timeline.rowconfigure(0, weight=1)
 
-        self.activity_canvas = tk.Canvas(timeline, bg=CARD_BG, height=260, highlightthickness=0, borderwidth=0)
+        self.activity_canvas = tk.Canvas(timeline, bg=CARD_BG, height=180, highlightthickness=0, borderwidth=0)
         self.activity_canvas.grid(row=0, column=0, sticky="nsew")
         if CUSTOM_TK_AVAILABLE:
             scrollbar = ctk.CTkScrollbar(
@@ -1937,8 +1938,8 @@ class TrackerApp(AppRoot):
         self._append_activity_event("Status", "Tracker window is ready.", STATUS_IDLE)
 
     def _build_footer(self, shell):
-        footer = tk.Frame(shell, bg=FOOTER_BG, padx=16, pady=10)
-        footer.pack(fill="x")
+        footer = tk.Frame(shell, bg=FOOTER_BG, padx=16, pady=5)
+        footer.pack(side="bottom", fill="x")
         footer.grid_columnconfigure(0, weight=1)
         tk.Label(footer, textvariable=self.status_line_var, bg=FOOTER_BG, fg=SUBTEXT_FG, font=ui_font(11), anchor="w").grid(row=0, column=0, sticky="ew")
         tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg=FOOTER_BG, fg=SUBTEXT_FG, font=ui_font(11), anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))

@@ -36,7 +36,7 @@ Open **Updates** in the app.
 1. Run **Check now**.
 2. Review the latest release notes.
 3. Download the selected package.
-4. Choose **Apply downloaded update**.
+4. Choose **Apply update**.
 
 Automatic apply is available only in the packaged EXE build. The package must contain `CivitAITracker.exe` and the `_internal/` app folder. Source ZIP files are rejected before the app closes.
 

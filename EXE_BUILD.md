@@ -62,7 +62,9 @@ After building:
 5. Run **Run now**.
 6. Open the dashboard and confirm the `generated ...` timestamp changed.
 7. Confirm previews, Performance filters, and Collections filters still render correctly.
-8. Check `logs\core_last.log` for fatal errors.
+8. Confirm the main window Activity area and status footer are visible at the default size.
+9. Confirm Settings, Updates, and Diagnostics open with readable text and styled scrollbars.
+10. Check `logs\core_last.log` for fatal errors.
 
 When testing collection tracking, use a configured API key and confirm `collection_ingest.ok` is true or that any reported reason is expected.
 
