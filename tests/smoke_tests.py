@@ -361,6 +361,7 @@ class UpdateManagerSmokeTests(unittest.TestCase):
         self.assertIn("'requests'", spec)
         self.assertIn("collect_data_files('customtkinter')", spec)
         self.assertIn("collect_submodules('customtkinter')", spec)
+        self.assertIn("assets/fonts", spec)
 
 
 class CollectionParserSmokeTests(unittest.TestCase):
