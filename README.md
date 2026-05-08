@@ -60,7 +60,7 @@ The key can be stored inline in `config.json` or in a separate file such as `api
 Install dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+.\install_requirements.bat
 ```
 
 Create `config.json` from `config.example.json`, then launch:
@@ -69,13 +69,19 @@ Create `config.json` from `config.example.json`, then launch:
 .\launch_tracker.pyw
 ```
 
-For troubleshooting with a visible console:
+For fallback startup with console diagnostics:
 
 ```powershell
-python tracker_app.py
+.\launch_tracker.bat
 ```
 
-`launch_tracker.bat` is also available as a console-backed launcher fallback.
+For direct development troubleshooting:
+
+```powershell
+.\dev_run_tracker.bat
+```
+
+`launch_tracker.pyw` is the supported no-console source launcher. The `.bat` launchers are fallback tools for setup and startup diagnostics.
 
 ## Quick Start: EXE Mode
 
@@ -156,7 +162,9 @@ The dashboard is generated as `dashboard.html` and opened from the desktop app. 
 - daily and weekly movement;
 - visual overview charts;
 - suggested posting windows;
-- post performance table with quick period filters;
+- post performance board and full table with quick period filters;
+- timing board for best posting hours and weekdays;
+- history board for all-time and early-window leaders;
 - collection activity tables;
 - thumbnail previews and post detail drawer when image metadata is available.
 

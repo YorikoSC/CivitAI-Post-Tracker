@@ -1,5 +1,18 @@
 # Changelog
 
+## v10.4.0
+
+### Added
+- Performance board on the dashboard with compact cards for recent momentum, collection movers, and fresh posts.
+- Timing board with compact cards for best posting hours, weekdays, and recommendation basis.
+- History board with compact cards for all-time and early-window leaders.
+- Dashboard smoke coverage for the Performance, Timing, and History boards plus card-to-detail-drawer wiring.
+
+### Changed
+- Source-mode fallback launch scripts now fail with clearer setup guidance when Python or UI dependencies are missing.
+- `install_requirements.bat` now validates Python 3.11+, backs up unusable local environments, installs dependencies into `.venv`, and verifies CustomTkinter.
+- Dashboard guide now describes the Performance view as both a compact board and detailed table.
+
 ## v10.3.0
 
 ### Added

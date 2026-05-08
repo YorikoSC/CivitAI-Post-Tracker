@@ -41,9 +41,17 @@ The workspace includes table search, recent-activity filtering, image-only row f
 - Year
 - All time
 
-## Performance Table
+## Performance View
 
-The Performance table is a per-post monitoring view. It usually includes:
+The Performance tab starts with a compact board for scanning:
+
+- recent momentum;
+- collection movers;
+- fresh posts.
+
+Clicking a performance card opens the same detail drawer as the table.
+
+The full Performance table remains below the board as the detailed per-post monitoring view. It usually includes:
 
 - post link;
 - thumbnail preview when a stored preview URL is available;
@@ -56,7 +64,7 @@ The Performance table is a per-post monitoring view. It usually includes:
 - image count;
 - last seen / last update.
 
-Clicking a row opens a detail drawer with a larger preview, compact metrics, post link, primary image link, and stored image links.
+Clicking a table row opens a detail drawer with a larger preview, compact metrics, post link, primary image link, and stored image links.
 
 Older local image rows may not have preview URLs yet. If an image ID is known, the dashboard falls back to an `Open image` link. Otherwise it shows `No preview` until a later tracker run stores more image metadata.
 
@@ -81,6 +89,28 @@ Collection image previews use the same thumbnail-sized slot as normal previews. 
 The Collections workspace uses compact cards instead of a stack of separate tables. Search, quick period filters, and the image-only toggle still apply to those cards.
 
 Clicking a collection card opens the same detail drawer pattern used by the Performance tab, with image/post links and compact collection context.
+
+## Timing
+
+The Timing tab starts with a compact board for scanning:
+
+- best local posting hours;
+- best local weekdays;
+- the recommendation basis used for the current scoring.
+
+The detailed tables remain below the board. They show ranked timing candidates and the underlying publish-hour / weekday summaries from the local database.
+
+Timing suggestions are calculated from historical performance. Treat them as hints, not rules. Small samples, unusual posts, content mix changes, and platform behavior can skew the result.
+
+## History
+
+The History tab starts with compact leader cards for:
+
+- all-time reaction leaders;
+- best captured first-day windows;
+- best captured first-2h windows.
+
+Clicking a History card opens the same post detail drawer used by Performance cards. The full leader, early-window, and recent-post tables remain below the board.
 
 ## API Key Effects
 
