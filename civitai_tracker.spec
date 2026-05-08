@@ -17,12 +17,17 @@ hiddenimports = [
 hiddenimports += collect_submodules('pystray')
 hiddenimports += collect_submodules('customtkinter')
 
+exe_icon = 'assets/app_icon.ico' if Path('assets/app_icon.ico').exists() else None
 datas = [
     ('config.example.json', '.'),
     ('README.md', '.'),
     ('DASHBOARD_GUIDE.md', '.'),
     ('UPDATE_GUIDE.md', '.'),
 ]
+if Path('assets/app_icon.png').exists():
+    datas.append(('assets/app_icon.png', 'assets'))
+if Path('assets/app_icon.ico').exists():
+    datas.append(('assets/app_icon.ico', 'assets'))
 if Path('assets/fonts').exists():
     datas.append(('assets/fonts', 'assets/fonts'))
 datas += collect_data_files('customtkinter')
@@ -53,6 +58,7 @@ exe = EXE(
     strip=False,
     upx=True,
     console=False,
+    icon=exe_icon,
 )
 
 coll = COLLECT(

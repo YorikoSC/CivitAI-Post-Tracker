@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import ctypes
 import os
 import queue
@@ -144,6 +145,8 @@ DISPLAY_FONT_CANDIDATES = ("Russo One", "Exo 2", FALLBACK_FONT_FAMILY)
 UI_FONT_FAMILY = FALLBACK_FONT_FAMILY
 DISPLAY_FONT_FAMILY = FALLBACK_FONT_FAMILY
 APP_FONT_DIR = "assets/fonts"
+APP_ICON_PNG = "assets/app_icon.png"
+APP_ICON_ICO = "assets/app_icon.ico"
 _FONT_SYSTEM_READY = False
 _LOADED_FONT_PATHS: set[Path] = set()
 
@@ -206,6 +209,43 @@ def configure_font_system(widget: tk.Misc, base_dir: Path | None = None) -> None
     UI_FONT_FAMILY = next((name for name in BODY_FONT_CANDIDATES if name in available), FALLBACK_FONT_FAMILY)
     DISPLAY_FONT_FAMILY = next((name for name in DISPLAY_FONT_CANDIDATES if name in available), UI_FONT_FAMILY)
     _FONT_SYSTEM_READY = True
+
+
+def find_app_asset(relative_path: str, base_dir: Path | None = None) -> Path | None:
+    roots: list[Path] = []
+    if base_dir is not None:
+        roots.append(base_dir)
+    if getattr(sys, "frozen", False):
+        roots.append(Path(getattr(sys, "_MEIPASS", Path(sys.executable).resolve().parent)))
+        roots.append(Path(sys.executable).resolve().parent)
+    roots.append(Path(__file__).resolve().parent)
+    for root in roots:
+        candidate = root / relative_path
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def apply_window_icon(window: tk.Misc, base_dir: Path | None = None) -> None:
+    ico_path = find_app_asset(APP_ICON_ICO, base_dir)
+    if ico_path is not None and sys.platform.startswith("win"):
+        try:
+            window.iconbitmap(str(ico_path))
+        except Exception:
+            pass
+
+    png_path = find_app_asset(APP_ICON_PNG, base_dir)
+    if png_path is None:
+        return
+    try:
+        try:
+            icon_photo = tk.PhotoImage(file=str(png_path))
+        except tk.TclError:
+            icon_photo = tk.PhotoImage(data=base64.b64encode(png_path.read_bytes()).decode("ascii"))
+        window.iconphoto(True, icon_photo)
+        window._app_icon_photo = icon_photo  # type: ignore[attr-defined]
+    except Exception:
+        pass
 
 
 def _local_display_datetime(value: datetime) -> datetime:
@@ -729,6 +769,7 @@ class SettingsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, base_dir: Path, config: dict, on_save):
         super().__init__(master)
         self.title("CivitAI Tracker Settings")
+        apply_window_icon(self, getattr(master, "bundle_dir", base_dir))
         self.geometry("940x820")
         self.minsize(900, 760)
         self.base_dir = base_dir
@@ -1124,6 +1165,7 @@ class DiagnosticsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, report: dict):
         super().__init__(master)
         self.title("Diagnostics")
+        apply_window_icon(self, getattr(master, "bundle_dir", None))
         self.geometry("940x900")
         self.minsize(900, 840)
         self.report = report
@@ -1243,6 +1285,7 @@ class UpdateDialog(DialogWindow):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
+        apply_window_icon(self, getattr(master, "bundle_dir", runtime_dir))
         self.geometry("940x840")
         self.minsize(900, 780)
         self.runtime_dir = runtime_dir
@@ -1689,6 +1732,7 @@ class TrackerApp(AppRoot):
         self.runtime_dir = get_runtime_data_dir(__file__)
         self.base_dir = self.runtime_dir
         configure_font_system(self, self.bundle_dir)
+        apply_window_icon(self, self.bundle_dir)
         ensure_example_copied_if_missing(self.runtime_dir, self.bundle_dir)
         self.config_path = self.runtime_dir / "config.json"
         self.log_queue: queue.Queue[str] = queue.Queue()
@@ -2168,10 +2212,17 @@ class TrackerApp(AppRoot):
         SettingsDialog(self, self.runtime_dir, current, on_save)
 
     def _create_tray_image(self):
+        icon_path = find_app_asset(APP_ICON_PNG, self.bundle_dir)
+        if icon_path is not None:
+            try:
+                return Image.open(icon_path).convert("RGBA").resize((64, 64), Image.Resampling.LANCZOS)
+            except Exception:
+                pass
+
         image = Image.new("RGB", (64, 64), color=(17, 19, 23))
         draw = ImageDraw.Draw(image)
-        draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(141, 29, 36))
-        draw.ellipse((18, 18, 46, 46), fill=(255, 255, 255))
+        draw.rounded_rectangle((6, 6, 58, 58), radius=12, fill=(47, 111, 179))
+        draw.ellipse((18, 18, 46, 46), fill=(34, 211, 238))
         draw.rectangle((29, 14, 35, 50), fill=(17, 19, 23))
         draw.rectangle((14, 29, 50, 35), fill=(17, 19, 23))
         return image
