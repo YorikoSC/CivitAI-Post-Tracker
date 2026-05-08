@@ -37,6 +37,7 @@ class TrackerRunner:
         self.log_callback = log_callback
         self.runtime_status_path = self.base_dir / "runtime_status.json"
         self.state = RunnerState(app_started_at=datetime.now())
+        self._restore_runtime_status()
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._persist_runtime_status(refresh_dashboard=False)
@@ -103,6 +104,34 @@ class TrackerRunner:
             return datetime.fromisoformat(str(value).replace("Z", "+00:00"))
         except Exception:
             return None
+
+    def _restore_runtime_status(self) -> None:
+        if not self.runtime_status_path.exists():
+            return
+        try:
+            payload = json.loads(self.runtime_status_path.read_text(encoding="utf-8"))
+        except Exception:
+            return
+        if not isinstance(payload, dict):
+            return
+
+        last_success_at = self._parse_iso_dt(payload.get("last_success_at"))
+        last_started_at = self._parse_iso_dt(payload.get("last_started_at"))
+        last_error = str(payload.get("last_error") or "")
+        selected_host = str(payload.get("selected_host") or "")
+        last_exit_code = payload.get("last_exit_code")
+        if last_exit_code is not None:
+            try:
+                last_exit_code = int(last_exit_code)
+            except Exception:
+                last_exit_code = None
+
+        with self.state.lock:
+            self.state.last_success_at = last_success_at
+            self.state.last_started_at = last_started_at
+            self.state.last_error = last_error
+            self.state.selected_host = selected_host
+            self.state.last_exit_code = last_exit_code
 
     def _refresh_dashboard_status(self) -> None:
         try:

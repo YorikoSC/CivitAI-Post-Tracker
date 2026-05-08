@@ -73,6 +73,15 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
             """
         ).fetchone()[0]
 
+        unmapped_events = conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM content_engagement_events
+            WHERE normalized_type = 'collection_like'
+              AND related_post_id IS NULL
+            """
+        ).fetchone()[0]
+
         recent_rows = _fetch_all(
             conn,
             """
@@ -89,7 +98,6 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
                 cee.event_time,
                 COALESCE(cee.related_image_id, cee.target_id) AS image_id,
                 cee.related_post_id,
-                cee.by_user_id,
                 latest_posts.title,
                 latest_posts.published_at,
                 {preview_select}
@@ -170,16 +178,16 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
             "affected_images": int(affected_images or 0),
             "affected_posts": int(affected_posts or 0),
             "last_collection_event": last_event_time,
+            "unmapped_events": int(unmapped_events or 0),
             "recent_collection_adds": [
                 {
                     "event_time": row[0],
                     "image_id": row[1],
                     "post_id": row[2],
-                    "by_user_id": row[3],
-                    "title": row[4],
-                    "published_at": row[5],
-                    "thumbnail_url": row[6],
-                    "image_url": row[7],
+                    "title": row[3],
+                    "published_at": row[4],
+                    "thumbnail_url": row[5],
+                    "image_url": row[6],
                 }
                 for row in recent_rows
             ],
@@ -217,6 +225,7 @@ def get_collection_dashboard_data(db_path: str, recent_limit: int = 20, top_limi
             "affected_images": 0,
             "affected_posts": 0,
             "last_collection_event": None,
+            "unmapped_events": 0,
             "recent_collection_adds": [],
             "top_posts_by_collection_adds": [],
             "top_images_by_collection_adds": [],
@@ -246,6 +255,16 @@ def _metric_card(label: str, value: Any, detail: str) -> str:
         f"<div class='metric-label'>{html.escape(label)}</div>"
         f"<div class='metric-value'>{_fmt(value)}</div>"
         f"<div class='metric-detail'>{html.escape(detail)}</div>"
+        "</div>"
+    )
+
+
+def _collection_metric(label: str, value: Any, detail: str) -> str:
+    return (
+        "<div class='collection-kpi'>"
+        f"<div class='collection-kpi-label'>{html.escape(label)}</div>"
+        f"<div class='collection-kpi-value'>{_fmt(value)}</div>"
+        f"<div class='collection-kpi-detail'>{html.escape(detail)}</div>"
         "</div>"
     )
 
@@ -375,20 +394,76 @@ def _render_workspace_table(title: str, hint: str, headers: List[str], rows: Lis
     )
 
 
+def _collection_empty_state(title: str, text: str) -> str:
+    return (
+        "<div class='collection-empty'>"
+        f"<strong>{html.escape(title)}</strong>"
+        f"<span>{html.escape(text)}</span>"
+        "</div>"
+    )
+
+
+def _collection_sync_hint(data: Dict[str, Any], time_formatter: Optional[Callable[[Optional[str]], str]] = None) -> str:
+    sync_state = data.get("sync_state") or {}
+    parts: List[str] = []
+    collection_mode = str(sync_state.get("mode") or "").strip()
+    if collection_mode:
+        parts.append(f"Mode: {collection_mode}")
+    if sync_state.get("last_sync_at"):
+        parts.append(f"Last sync: {_fmt_time(sync_state.get('last_sync_at'), time_formatter)}")
+    if sync_state.get("oldest_event_time_seen"):
+        parts.append(f"Oldest loaded: {_fmt_time(sync_state.get('oldest_event_time_seen'), time_formatter)}")
+    if sync_state.get("target_start_time"):
+        parts.append(f"Target start: {_fmt_time(sync_state.get('target_start_time'), time_formatter)}")
+    return " · ".join(parts)
+
+
+def _render_collection_overview(
+    data: Dict[str, Any],
+    time_formatter: Optional[Callable[[Optional[str]], str]] = None,
+) -> str:
+    sync_hint = _collection_sync_hint(data, time_formatter)
+    hint_html = f"<div class='hint'>{sync_hint}</div>" if sync_hint else ""
+    return (
+        "<section class='workspace-block collection-overview'>"
+        "<h3>Collection overview</h3>"
+        f"{hint_html}"
+        "<div class='collection-kpis'>"
+        f"{_collection_metric('Collection adds', data.get('total_collection_adds', 0), 'Detected additions')}"
+        f"{_collection_metric('Affected posts', data.get('affected_posts', 0), 'Mapped to local posts')}"
+        f"{_collection_metric('Affected images', data.get('affected_images', 0), 'Unique images collected')}"
+        f"{_collection_metric('Image-only events', data.get('unmapped_events', 0), 'Not mapped to a local post yet')}"
+        f"{_collection_metric('Last event', _fmt_time(data.get('last_collection_event'), time_formatter), 'Latest collection add')}"
+        "</div>"
+        "</section>"
+    )
+
+
 def _collection_table_rows(
     data: Dict[str, Any],
     view_host: str,
     time_formatter: Optional[Callable[[Optional[str]], str]] = None,
-) -> Tuple[List[List[Any]], List[List[Any]], List[List[Any]]]:
+) -> Tuple[List[List[Any]], List[List[Any]], List[List[Any]], List[List[Any]]]:
     recent_rows = [
         [
             _period_marker(item.get("event_time")) + _image_preview_cell(view_host, item.get("image_id"), item.get("thumbnail_url"), item.get("image_url")),
             _fmt_time(item.get("event_time"), time_formatter),
             _post_cell(view_host, item.get("post_id"), item.get("title"), item.get("image_id")),
             _image_cell(view_host, item.get("image_id")),
-            _fmt(item.get("by_user_id")),
         ]
         for item in data.get("recent_collection_adds", [])
+        if item.get("post_id") not in (None, "")
+    ]
+
+    image_only_rows = [
+        [
+            _period_marker(item.get("event_time")) + _image_preview_cell(view_host, item.get("image_id"), item.get("thumbnail_url"), item.get("image_url")),
+            _fmt_time(item.get("event_time"), time_formatter),
+            _post_cell(view_host, item.get("post_id"), item.get("title"), item.get("image_id")),
+            _image_cell(view_host, item.get("image_id")),
+        ]
+        for item in data.get("recent_collection_adds", [])
+        if item.get("post_id") in (None, "")
     ]
 
     top_post_rows = [
@@ -412,7 +487,7 @@ def _collection_table_rows(
         for item in data.get("top_images_by_collection_adds", [])
     ]
 
-    return recent_rows, top_post_rows, top_image_rows
+    return recent_rows, top_post_rows, top_image_rows, image_only_rows
 
 
 def render_collection_dashboard_section(
@@ -459,7 +534,7 @@ def render_collection_dashboard_section(
         state_hint_parts.append(f"Last sync: {sync_state.get('last_sync_at')}")
     state_hint = " · ".join(state_hint_parts)
 
-    recent_rows, top_post_rows, top_image_rows = _collection_table_rows(data, view_host, time_formatter)
+    recent_rows, top_post_rows, top_image_rows, image_only_rows = _collection_table_rows(data, view_host, time_formatter)
 
     parts: List[str] = []
     parts.append("<div class='section-title'>Collections</div>")
@@ -477,11 +552,13 @@ def render_collection_dashboard_section(
         parts.append(warning_html)
 
     if include_tables:
+        parts.append(_render_collection_overview(data, time_formatter))
+
         parts.append(
             _render_panel_table(
-                "Recent collection adds",
-                "Latest detected additions of your images to collections.",
-                ["Preview", "Time", "Post", "Image ID", "Actor ID"],
+                "Recent mapped activity",
+                "Latest detected additions that are mapped to local posts.",
+                ["Preview", "Time", "Post", "Image ID"],
                 recent_rows,
                 escape_cells=False,
             )
@@ -499,13 +576,24 @@ def render_collection_dashboard_section(
 
         parts.append(
             _render_panel_table(
-                "Top images by collection adds",
+                "Top collected images",
                 "Images most often added to collections.",
                 ["Preview", "Image ID", "Post", "Collection adds", "Last add"],
                 top_image_rows,
                 escape_cells=False,
             )
         )
+
+        if image_only_rows:
+            parts.append(
+                _render_panel_table(
+                    "Image-only activity",
+                    "Recent collection events that are not mapped to a local post yet.",
+                    ["Preview", "Time", "Status", "Image ID"],
+                    image_only_rows,
+                    escape_cells=False,
+                )
+            )
 
     return "".join(parts)
 
@@ -522,13 +610,23 @@ def render_collection_tables_html(
     if not data.get("ok"):
         return f"<div class='feature-note'>{_fmt(data.get('error'))}</div>"
 
-    recent_rows, top_post_rows, top_image_rows = _collection_table_rows(data, view_host, time_formatter)
+    recent_rows, top_post_rows, top_image_rows, image_only_rows = _collection_table_rows(data, view_host, time_formatter)
+    has_any_rows = any([recent_rows, top_post_rows, top_image_rows, image_only_rows])
     return "".join(
         [
+            _render_collection_overview(data, time_formatter),
+            (
+                _collection_empty_state(
+                    "No collection activity yet",
+                    "Run the tracker with collection tracking enabled after your images are added to collections.",
+                )
+                if not has_any_rows
+                else ""
+            ),
             _render_workspace_table(
-                "Recent collection adds",
-                "Latest detected additions of your images to collections.",
-                ["Preview", "Time", "Post", "Image ID", "Actor ID"],
+                "Recent mapped activity",
+                "Latest detected collection additions that are mapped to local posts.",
+                ["Preview", "Time", "Post", "Image ID"],
                 recent_rows,
                 escape_cells=False,
             ),
@@ -540,14 +638,36 @@ def render_collection_tables_html(
                 escape_cells=False,
             ),
             _render_workspace_table(
-                "Top images by collection adds",
+                "Top collected images",
                 "Images most often added to collections.",
                 ["Preview", "Image ID", "Post", "Collection adds", "Last add"],
                 top_image_rows,
                 escape_cells=False,
             ),
+            (
+                _render_workspace_table(
+                    "Image-only activity",
+                    "Recent collection events that are not mapped to a local post yet.",
+                    ["Preview", "Time", "Status", "Image ID"],
+                    image_only_rows,
+                    escape_cells=False,
+                )
+                if image_only_rows
+                else ""
+            ),
         ]
     )
 
 
-COLLECTION_SECTION_CSS = ""
+COLLECTION_SECTION_CSS = """
+<style>
+.collection-overview{overflow:visible}
+.collection-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-top:12px}
+.collection-kpi{border:1px solid var(--border);background:#0d1528;border-radius:12px;padding:14px;min-height:112px}
+.collection-kpi-label{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);margin-bottom:8px}
+.collection-kpi-value{font-size:22px;font-weight:800;line-height:1.2}
+.collection-kpi-detail{margin-top:8px;color:var(--muted);font-size:12px;line-height:1.35}
+.collection-empty{border:1px dashed var(--border);background:#0d1528;border-radius:12px;padding:16px;margin:16px 0;color:var(--muted);display:flex;flex-direction:column;gap:6px}
+.collection-empty strong{color:var(--text);font-size:16px}
+</style>
+"""

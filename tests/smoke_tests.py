@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import shutil
 import subprocess
@@ -27,6 +28,7 @@ from collection_sync_state import ensure_collection_sync_schema, read_collection
 from config_utils import normalize_config, run_startup_self_check
 from engagement_dashboard import render_collection_tables_html
 from tracker_app import format_elapsed_time, format_next_run_time
+from tracker_runner import TrackerRunner
 from tracker_service import (
     TimezoneHelper,
     build_post_performance_rows,
@@ -66,6 +68,46 @@ class DesktopStatusFormattingSmokeTests(unittest.TestCase):
         last_success = now - timedelta(minutes=4, seconds=30)
 
         self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
+
+
+class TrackerRunnerRuntimeStatusSmokeTests(unittest.TestCase):
+    def test_runner_preserves_previous_success_status_on_startup(self) -> None:
+        runtime_dir = smoke_path("runner_status", "")
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            previous_success = "2026-05-07T12:00:00+00:00"
+            previous_started = "2026-05-07T11:59:00+00:00"
+            (runtime_dir / "runtime_status.json").write_text(
+                json.dumps(
+                    {
+                        "last_success_at": previous_success,
+                        "last_started_at": previous_started,
+                        "last_error": "Previous recoverable error",
+                        "last_exit_code": 1,
+                        "selected_host": "https://civitai.red",
+                        "auto_polling": True,
+                        "next_run_at": "2026-05-07T12:15:00+00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            runner = TrackerRunner(runtime_dir, "config.json")
+            snap = runner.snapshot()
+            persisted = json.loads((runtime_dir / "runtime_status.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(snap.last_success_at.isoformat(), previous_success)
+            self.assertEqual(snap.last_started_at.isoformat(), previous_started)
+            self.assertEqual(snap.last_error, "Previous recoverable error")
+            self.assertEqual(snap.last_exit_code, 1)
+            self.assertEqual(snap.selected_host, "https://civitai.red")
+            self.assertFalse(snap.auto_polling)
+            self.assertIsNone(snap.next_run_at)
+            self.assertEqual(persisted["last_success_at"], previous_success)
+            self.assertFalse(persisted["auto_polling"])
+            self.assertIsNone(persisted["next_run_at"])
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 class StartupSelfCheckSmokeTests(unittest.TestCase):
@@ -826,11 +868,17 @@ class DashboardSmokeTests(unittest.TestCase):
                 pass
 
         self.assertIn('href="https://civitai.red/images/123456"', rendered)
+        self.assertIn("Collection overview", rendered)
+        self.assertIn("Image-only events", rendered)
+        self.assertIn("Recent mapped activity", rendered)
+        self.assertIn("Image-only activity", rendered)
         self.assertIn("class='preview-link'", rendered)
         self.assertIn("Preview unavailable or restricted", rendered)
         self.assertIn("data-period-all='1'", rendered)
         self.assertIn("data-period-day='1'", rendered)
         self.assertIn("Post mapping not found locally", rendered)
+        self.assertNotIn("Actor ID", rendered)
+        self.assertNotIn("by_user_id", rendered)
         self.assertNotIn("Image not matched", rendered)
 
 

@@ -71,6 +71,7 @@ The Collections views show:
 - affected posts;
 - recent collection events;
 - top posts and images by collection additions.
+- image-only events that are not mapped to a local post yet.
 
 Rows marked `Post mapping not found locally` are image-level events that could not be mapped to a local post in `post_images`. The dashboard still links those rows to the CivitAI image page.
 
