@@ -270,7 +270,7 @@ def format_next_run_time(value: datetime | None, *, now: datetime | None = None)
 def apply_desktop_theme(widget: tk.Misc) -> None:
     configure_font_system(widget)
     try:
-        widget.option_add("*Font", ui_font(10))
+        widget.option_add("*Font", ui_font(11))
     except tk.TclError:
         pass
     if CUSTOM_TK_AVAILABLE:
@@ -281,7 +281,7 @@ def apply_desktop_theme(widget: tk.Misc) -> None:
     except Exception:
         pass
 
-    style.configure(".", background=APP_BG, foreground=HEADER_FG, font=ui_font(10))
+    style.configure(".", background=APP_BG, foreground=HEADER_FG, font=ui_font(11))
     style.configure("TFrame", background=APP_BG, borderwidth=0)
     style.configure("Card.TFrame", background=CARD_BG, borderwidth=0)
     style.configure("TLabel", background=APP_BG, foreground=HEADER_FG)
@@ -358,8 +358,8 @@ def apply_desktop_theme(widget: tk.Misc) -> None:
         background=[("selected", CARD_BG), ("active", "#17233f")],
         foreground=[("selected", HEADER_FG), ("active", HEADER_FG), ("!selected", SUBTEXT_FG)],
     )
-    style.configure("Primary.TButton", padding=(14, 9), font=ui_font(11, "bold"))
-    style.configure("Secondary.TButton", padding=(12, 8), font=ui_font(10))
+    style.configure("Primary.TButton", padding=(16, 10), font=ui_font(13, "bold"))
+    style.configure("Secondary.TButton", padding=(14, 10), font=ui_font(12))
     style.map(
         "Primary.TButton",
         foreground=[("disabled", "#7d8795"), ("!disabled", "#ffffff")],
@@ -396,14 +396,14 @@ def make_button(parent: tk.Misc, text: str, command, *, kind: str = "secondary",
             command=command,
             state=state,
             width=120,
-            height=36,
+            height=42,
             corner_radius=8,
             border_width=0 if is_primary else 1,
             border_color=BORDER_FG,
             fg_color=ACCENT_BG if is_primary else CARD_ALT_BG,
             hover_color=ACCENT_HOVER_BG if is_primary else "#1b2947",
             text_color="#ffffff" if is_primary else "#f4f6f8",
-            font=ui_font(11 if is_primary else 10, "bold" if is_primary else "normal"),
+            font=ui_font(13 if is_primary else 12, "bold" if is_primary else "normal"),
         )
     style = "Primary.TButton" if kind == "primary" else "Secondary.TButton"
     return ttk.Button(parent, text=text, command=command, state=state, style=style)
@@ -416,7 +416,7 @@ def make_entry(parent: tk.Misc, variable: tk.StringVar, *, width: int | None = N
             parent,
             textvariable=variable,
             width=pixel_width,
-            height=34,
+            height=40,
             corner_radius=8,
             border_width=1,
             border_color=BORDER_FG,
@@ -425,7 +425,7 @@ def make_entry(parent: tk.Misc, variable: tk.StringVar, *, width: int | None = N
             placeholder_text_color=SUBTEXT_FG,
             show=show,
             justify=justify or "left",
-            font=ui_font(11),
+            font=ui_font(12),
         )
     options = {"textvariable": variable}
     if width is not None:
@@ -445,7 +445,7 @@ def make_combobox(parent: tk.Misc, variable: tk.StringVar, values: list[str], *,
             values=values,
             state="readonly",
             width=max(120, width * 9),
-            height=34,
+            height=40,
             corner_radius=8,
             border_width=1,
             border_color=BORDER_FG,
@@ -456,8 +456,8 @@ def make_combobox(parent: tk.Misc, variable: tk.StringVar, values: list[str], *,
             dropdown_hover_color="#1b2947",
             dropdown_text_color=HEADER_FG,
             text_color=HEADER_FG,
-            font=ui_font(11),
-            dropdown_font=ui_font(11),
+            font=ui_font(12),
+            dropdown_font=ui_font(12),
         )
     return ttk.Combobox(parent, textvariable=variable, values=values, state="readonly", width=width)
 
@@ -474,7 +474,7 @@ def make_checkbox(parent: tk.Misc, text: str, variable: tk.BooleanVar):
             hover_color=ACCENT_HOVER_BG,
             border_color=BORDER_FG,
             text_color=HEADER_FG,
-            font=ui_font(11),
+            font=ui_font(12),
         )
     return ttk.Checkbutton(parent, text=text, variable=variable, style="Card.TCheckbutton")
 
@@ -495,9 +495,36 @@ def make_radio(parent: tk.Misc, text: str, variable: tk.StringVar, value: str, c
             hover_color=ACCENT_HOVER_BG,
             border_color=BORDER_FG,
             text_color=HEADER_FG,
-            font=ui_font(11),
+            font=ui_font(12),
         )
     return ttk.Radiobutton(parent, text=text, variable=variable, value=value, command=command, style="Card.TRadiobutton")
+
+
+def make_text_area(parent: tk.Misc, *, height: int = 160, wrap: str = "word"):
+    if CUSTOM_TK_AVAILABLE:
+        return ctk.CTkTextbox(
+            parent,
+            height=height,
+            wrap=wrap,
+            fg_color=INPUT_BG,
+            text_color=HEADER_FG,
+            border_width=0,
+            corner_radius=8,
+            scrollbar_button_color=CARD_ALT_BG,
+            scrollbar_button_hover_color=ACCENT_HOVER_BG,
+            font=ui_font(12),
+        )
+    return ScrolledText(
+        parent,
+        height=max(6, height // 22),
+        wrap=wrap,
+        bg=INPUT_BG,
+        fg=HEADER_FG,
+        insertbackground=HEADER_FG,
+        font=ui_font(12),
+        relief="flat",
+        borderwidth=0,
+    )
 
 
 def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
@@ -508,7 +535,7 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
             header,
             text=title,
             text_color=HEADER_FG,
-            font=ui_font(23, "bold", display=True),
+            font=ui_font(24, "bold", display=True),
             anchor="w",
         ).grid(row=0, column=0, sticky="w")
         ctk.CTkLabel(
@@ -516,7 +543,7 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
             text=f"v{APP_VERSION} / {get_execution_mode()}",
             fg_color=CARD_ALT_BG,
             text_color=SUBTEXT_FG,
-            font=ui_font(10, "bold"),
+            font=ui_font(11, "bold"),
             corner_radius=8,
             padx=10,
             pady=4,
@@ -525,7 +552,7 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
             header,
             text=subtitle,
             text_color=SUBTEXT_FG,
-            font=ui_font(11),
+            font=ui_font(12),
             anchor="w",
             justify="left",
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
@@ -533,13 +560,13 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
 
     header = tk.Frame(parent, bg=APP_BG, padx=4, pady=4)
     header.grid_columnconfigure(0, weight=1)
-    tk.Label(header, text=title, bg=APP_BG, fg=HEADER_FG, font=ui_font(23, "bold", display=True)).grid(row=0, column=0, sticky="w")
+    tk.Label(header, text=title, bg=APP_BG, fg=HEADER_FG, font=ui_font(24, "bold", display=True)).grid(row=0, column=0, sticky="w")
     tk.Label(
         header,
         text=f"v{APP_VERSION} / {get_execution_mode()}",
         bg=CARD_ALT_BG,
         fg=SUBTEXT_FG,
-        font=ui_font(10, "bold"),
+        font=ui_font(11, "bold"),
         padx=10,
         pady=4,
     ).grid(row=0, column=1, sticky="e")
@@ -548,7 +575,7 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
         text=subtitle,
         bg=APP_BG,
         fg=SUBTEXT_FG,
-        font=ui_font(11),
+        font=ui_font(12),
         justify="left",
     ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
     return header
@@ -568,14 +595,14 @@ def make_panel(parent: tk.Misc, title: str | None = None, *, padx: int = 16, pad
                 panel,
                 text=title,
                 text_color=SUBTEXT_FG,
-                font=ui_font(10, "bold"),
+                font=ui_font(11, "bold"),
                 anchor="w",
             ).pack(anchor="w", padx=padx, pady=(pady, 0))
         return panel
 
     panel = tk.Frame(parent, bg=CARD_BG, padx=padx, pady=pady, highlightthickness=1, highlightbackground=BORDER_FG)
     if title:
-        tk.Label(panel, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+        tk.Label(panel, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(11, "bold")).pack(anchor="w")
     return panel
 
 
@@ -593,14 +620,14 @@ def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, c
             tile,
             text=label,
             text_color=SUBTEXT_FG,
-            font=ui_font(9, "bold"),
+            font=ui_font(10, "bold"),
             anchor="w",
         ).pack(anchor="w", padx=12, pady=(10, 0))
         ctk.CTkLabel(
             tile,
             textvariable=var,
             text_color=HEADER_FG,
-            font=ui_font(11),
+            font=ui_font(12),
             wraplength=wraplength,
             justify="left",
             anchor="w",
@@ -609,13 +636,13 @@ def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, c
 
     tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
     tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
-    tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(9, "bold")).pack(anchor="w")
+    tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
     tk.Label(
         tile,
         textvariable=var,
         bg=CARD_ALT_BG,
         fg=HEADER_FG,
-        font=ui_font(11),
+        font=ui_font(12),
         wraplength=wraplength,
         justify="left",
     ).pack(anchor="w", pady=(4, 0))
@@ -702,8 +729,8 @@ class SettingsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, base_dir: Path, config: dict, on_save):
         super().__init__(master)
         self.title("CivitAI Tracker Settings")
-        self.geometry("900x760")
-        self.minsize(860, 700)
+        self.geometry("940x820")
+        self.minsize(900, 760)
         self.base_dir = base_dir
         self.on_save = on_save
 
@@ -793,6 +820,11 @@ class SettingsDialog(DialogWindow):
         self.api_tab = self._make_tab(notebook, "CivitAI")
         self.output_tab = self._make_tab(notebook, "Files")
         self.app_tab = self._make_tab(notebook, "App")
+        if CUSTOM_TK_AVAILABLE:
+            try:
+                notebook._segmented_button.configure(font=ui_font(12))
+            except Exception:
+                pass
 
         self._build_profile_tab()
         self._build_auth_tab()
@@ -804,7 +836,7 @@ class SettingsDialog(DialogWindow):
         footer = tk.Frame(container, bg=APP_BG)
         footer.grid(row=2, column=0, sticky="ew", pady=(12, 0))
         footer.columnconfigure(0, weight=1)
-        tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
+        tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
         buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=0, column=1, sticky="e")
         make_button(buttons, "Cancel", self.destroy).pack(side="left", padx=(0, 8))
@@ -829,17 +861,17 @@ class SettingsDialog(DialogWindow):
         return frame
 
     def _add_section_intro(self, parent: tk.Frame, row: int, title: str, text: str) -> int:
-        tk.Label(parent, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, columnspan=2, sticky="w")
+        tk.Label(parent, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(11, "bold")).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
-        tk.Label(parent, text=text, bg=CARD_BG, fg=HEADER_FG, font=ui_font(14, "bold"), justify="left", wraplength=680).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 16))
+        tk.Label(parent, text=text, bg=CARD_BG, fg=HEADER_FG, font=ui_font(16, "bold"), justify="left", wraplength=680).grid(row=row, column=0, columnspan=2, sticky="w", pady=(6, 16))
         return row + 1
 
     def _add_help(self, parent: tk.Frame, row: int, text: str) -> int:
-        tk.Label(parent, text=text, bg=CARD_BG, fg=SUBTEXT_FG, wraplength=520, justify="left").grid(row=row, column=1, sticky="w", pady=(0, 12))
+        tk.Label(parent, text=text, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=560, justify="left").grid(row=row, column=1, sticky="w", pady=(0, 14))
         return row + 1
 
     def _add_entry_row(self, parent: tk.Frame, row: int, label: str, variable: tk.StringVar, *, width: int = 40, help_text: str | None = None):
-        tk.Label(parent, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(parent, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         entry = make_entry(parent, variable, width=width)
         entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
@@ -853,7 +885,7 @@ class SettingsDialog(DialogWindow):
         _, row = self._add_entry_row(self.profile_tab, row, "Username", self.username_var, help_text="Your public CivitAI username.")
         _, row = self._add_entry_row(self.profile_tab, row, "Display name", self.display_name_var, help_text="Optional friendly name used inside the app.")
 
-        tk.Label(self.profile_tab, text="Timezone", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.profile_tab, text="Timezone", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         tz_row = tk.Frame(self.profile_tab, bg=CARD_BG)
         tz_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         tz_row.columnconfigure(0, weight=1)
@@ -866,7 +898,7 @@ class SettingsDialog(DialogWindow):
     def _build_auth_tab(self):
         row = 0
         row = self._add_section_intro(self.auth_tab, row, "ACCESS", "A CivitAI key is optional. Without it, the tracker stays in limited public mode.")
-        tk.Label(self.auth_tab, text="Key storage", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.auth_tab, text="Key storage", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         mode_row = tk.Frame(self.auth_tab, bg=CARD_BG)
         mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
         make_radio(mode_row, "Store inside config", self.api_storage_var, "inline", self._toggle_auth_mode).pack(side="left")
@@ -874,12 +906,12 @@ class SettingsDialog(DialogWindow):
         row += 1
         row = self._add_help(self.auth_tab, row, "File mode is safer when you share or back up configs. The app will create and update the key file automatically.")
 
-        tk.Label(self.auth_tab, text="API key", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.auth_tab, text="API key", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         self.api_key_entry = make_entry(self.auth_tab, self.api_key_var, show="•")
         self.api_key_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
 
-        tk.Label(self.auth_tab, text="Key file", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.auth_tab, text="Key file", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         file_row = tk.Frame(self.auth_tab, bg=CARD_BG)
         file_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         file_row.columnconfigure(0, weight=1)
@@ -888,37 +920,37 @@ class SettingsDialog(DialogWindow):
         make_button(file_row, "Browse", self._browse_key_file).grid(row=0, column=1, padx=(8, 0))
         row += 1
 
-        self.auth_help_label = tk.Label(self.auth_tab, text="", bg=CARD_BG, fg=SUBTEXT_FG, wraplength=520, justify="left")
+        self.auth_help_label = tk.Label(self.auth_tab, text="", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=560, justify="left")
         self.auth_help_label.grid(row=row, column=1, sticky="w", pady=(0, 10))
 
     def _build_tracking_tab(self):
         row = 0
         row = self._add_section_intro(self.tracking_tab, row, "TRACKING WINDOW", "Choose where history starts and how often auto polling checks for new data.")
-        tk.Label(self.tracking_tab, text="Start mode", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.tracking_tab, text="Start mode", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         mode_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
         mode_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
         make_radio(mode_row, "Post ID or URL", self.start_mode_var, "post_id", self._toggle_start_mode).pack(side="left")
         make_radio(mode_row, "Date", self.start_mode_var, "date", self._toggle_start_mode).pack(side="left", padx=(14, 0))
         row += 1
 
-        tk.Label(self.tracking_tab, text="Start post", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.tracking_tab, text="Start post", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         self.start_post_entry = make_entry(self.tracking_tab, self.start_post_var)
         self.start_post_entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
         row += 1
         row = self._add_help(self.tracking_tab, row, "Paste a post ID or a full post URL.")
 
-        tk.Label(self.tracking_tab, text="Start date", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.tracking_tab, text="Start date", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         date_row = tk.Frame(self.tracking_tab, bg=CARD_BG)
         date_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
         self.start_day_entry = make_entry(date_row, self.start_day_var, width=4, justify="center")
         self.start_day_entry.pack(side="left")
-        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=5)
         self.start_month_entry = make_entry(date_row, self.start_month_var, width=4, justify="center")
         self.start_month_entry.pack(side="left")
-        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=5)
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=5)
         self.start_year_entry = make_entry(date_row, self.start_year_var, width=6, justify="center")
         self.start_year_entry.pack(side="left")
-        tk.Label(date_row, text="DD / MM / YYYY", bg=CARD_BG, fg=SUBTEXT_FG).pack(side="left", padx=(10, 0))
+        tk.Label(date_row, text="DD / MM / YYYY", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=(10, 0))
         row += 1
         row = self._add_help(self.tracking_tab, row, "Stored internally as YYYY-MM-DD.")
 
@@ -934,13 +966,13 @@ class SettingsDialog(DialogWindow):
     def _build_api_tab(self):
         row = 0
         row = self._add_section_intro(self.api_tab, row, "CIVITAI", "Choose which CivitAI host and visibility level the tracker should use.")
-        tk.Label(self.api_tab, text="Content host", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.api_tab, text="Content host", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         make_combobox(self.api_tab, self.api_mode_var, ["red", "auto", "com"], width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
         row = self._add_help(self.api_tab, row, "Use 'red' for full visibility, including content above PG-13.")
         _, row = self._add_entry_row(self.api_tab, row, "Open links on", self.view_host_var, help_text="Used for links opened from the app and dashboard.")
 
-        tk.Label(self.api_tab, text="Visibility", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 5), padx=(0, 14))
+        tk.Label(self.api_tab, text="Visibility", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=row, column=0, sticky="w", pady=(0, 6), padx=(0, 14))
         make_combobox(self.api_tab, self.nsfw_var, ["None", "Soft", "Mature", "X"], width=14).grid(row=row, column=1, sticky="w", pady=(0, 5))
         row += 1
         make_checkbox(self.api_tab, "Try alternate image lookup when previews are missing", self.allow_rest_var).grid(row=row, column=1, sticky="w", pady=(6, 0))
@@ -1092,8 +1124,8 @@ class DiagnosticsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, report: dict):
         super().__init__(master)
         self.title("Diagnostics")
-        self.geometry("860x680")
-        self.minsize(780, 600)
+        self.geometry("940x900")
+        self.minsize(900, 840)
         self.report = report
 
         self._build()
@@ -1107,7 +1139,7 @@ class DiagnosticsDialog(DialogWindow):
         wrapper = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(3, weight=1)
+        wrapper.rowconfigure(3, weight=1, minsize=240)
         make_dialog_header(
             wrapper,
             "Diagnostics",
@@ -1121,29 +1153,29 @@ class DiagnosticsDialog(DialogWindow):
             text=startup_check_summary(self.report),
             bg=CARD_BG,
             fg=HEADER_FG,
-            font=ui_font(16, "bold"),
+            font=ui_font(18, "bold"),
             justify="left",
-        ).pack(anchor="w", padx=16, pady=(10, 0))
+        ).pack(anchor="w", padx=16, pady=(6, 0))
         tk.Label(
             overview,
             text="Use the tiles below for a quick health check. The full technical report is kept in Details.",
             bg=CARD_BG,
             fg=SUBTEXT_FG,
-            font=ui_font(11),
+            font=ui_font(12),
             justify="left",
             wraplength=760,
-        ).pack(anchor="w", padx=16, pady=(6, 16))
+        ).pack(anchor="w", padx=16, pady=(4, 10))
 
         checks = make_panel(wrapper, "CHECKS")
-        checks.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
+        checks.grid(row=2, column=0, sticky="ew", pady=(0, 10))
         grid = tk.Frame(checks, bg=CARD_BG)
-        grid.pack(fill="x", padx=11, pady=(10, 16))
-        grid.columnconfigure((0, 1, 2), weight=1)
+        grid.pack(fill="x", padx=11, pady=(6, 10))
+        grid.columnconfigure((0, 1, 2, 3), weight=1)
         self._build_check_tiles(grid)
 
         details = make_panel(wrapper, "DETAILS")
         details.grid(row=3, column=0, sticky="nsew")
-        self.text = ScrolledText(details, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, font=ui_font(10), relief="flat", borderwidth=0)
+        self.text = make_text_area(details, height=190)
         self.text.pack(fill="both", expand=True, padx=16, pady=(10, 16))
         self.text.insert("1.0", format_startup_self_check(self.report))
         self.text.configure(state="disabled")
@@ -1172,19 +1204,19 @@ class DiagnosticsDialog(DialogWindow):
         rows = [
             ("Startup", *startup_state),
             ("Config", "Ready" if config_ok else "Needs setup", STATUS_OK if config_ok else STATUS_RUN, config_detail),
-            self._bool_tile("Runtime folder", details.get("runtime_dir_writable"), "Writable", "Not writable", str(details.get("runtime_dir", "Not available"))),
-            self._bool_tile("Logs", details.get("logs_dir_writable"), "Writable", "Needs attention", str(details.get("logs_dir", "Not available"))),
-            self._bool_tile("Database", details.get("db_parent_writable"), "Writable", "Blocked", str(details.get("db_parent", "Not available"))),
-            self._bool_tile("Dashboard", details.get("dashboard_parent_writable"), "Writable", "Blocked", str(details.get("dashboard_parent", "Not available"))),
+            self._bool_tile("Runtime folder", details.get("runtime_dir_writable"), "Writable", "Not writable", "App data folder"),
+            self._bool_tile("Logs", details.get("logs_dir_writable"), "Writable", "Needs attention", "Log files folder"),
+            self._bool_tile("Database", details.get("db_parent_writable"), "Writable", "Blocked", "Database folder"),
+            self._bool_tile("Dashboard", details.get("dashboard_parent_writable"), "Writable", "Blocked", "Dashboard folder"),
             (
                 "API key",
                 "Available" if details.get("api_key_available") else "Limited mode",
                 STATUS_OK if details.get("api_key_available") else STATUS_RUN,
-                "Authenticated fetches enabled" if details.get("api_key_available") else "Public data only; collections and restricted content may be incomplete",
+                "Authenticated fetches enabled" if details.get("api_key_available") else "Limited public data",
             ),
         ]
         for idx, (label, value, color, detail) in enumerate(rows):
-            self._make_check_tile(parent, label, value, color, detail, idx // 3, idx % 3)
+            self._make_check_tile(parent, label, value, color, detail, idx // 4, idx % 4)
 
     def _bool_tile(self, label: str, value, ok_label: str, fail_label: str, detail: str):
         if value is None:
@@ -1194,11 +1226,11 @@ class DiagnosticsDialog(DialogWindow):
         return (label, fail_label, STATUS_ERR, detail)
 
     def _make_check_tile(self, parent: tk.Frame, label: str, value: str, color: str, detail: str, row: int, column: int):
-        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=11, highlightthickness=1, highlightbackground=BORDER_FG)
-        tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
-        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(9, "bold")).pack(anchor="w")
-        tk.Label(tile, text=value, bg=CARD_ALT_BG, fg=color, font=ui_font(17, "bold"), justify="left").pack(anchor="w", pady=(5, 0))
-        tk.Label(tile, text=detail or "Not available", bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10), justify="left", wraplength=230).pack(anchor="w", pady=(4, 0))
+        tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=10, pady=7, highlightthickness=1, highlightbackground=BORDER_FG)
+        tile.grid(row=row, column=column, sticky="nsew", padx=4, pady=4)
+        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+        tk.Label(tile, text=value, bg=CARD_ALT_BG, fg=color, font=ui_font(15, "bold"), justify="left").pack(anchor="w", pady=(2, 0))
+        tk.Label(tile, text=detail or "Not available", bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10), justify="left", wraplength=190).pack(anchor="w", pady=(2, 0))
 
     def _copy(self):
         text = format_startup_self_check(self.report)
@@ -1211,8 +1243,8 @@ class UpdateDialog(DialogWindow):
     def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
         super().__init__(master)
         self.title("Updates")
-        self.geometry("900x760")
-        self.minsize(820, 660)
+        self.geometry("940x840")
+        self.minsize(900, 780)
         self.runtime_dir = runtime_dir
         self.execution_mode = execution_mode
         self.open_path = open_path
@@ -1280,7 +1312,7 @@ class UpdateDialog(DialogWindow):
         wrapper = tk.Frame(shell, bg=APP_BG, padx=18, pady=18)
         wrapper.pack(side="top", fill="both", expand=True)
         wrapper.columnconfigure(0, weight=1)
-        wrapper.rowconfigure(3, weight=1, minsize=180)
+        wrapper.rowconfigure(3, weight=1, minsize=240)
 
         header = make_dialog_header(
             wrapper,
@@ -1313,8 +1345,8 @@ class UpdateDialog(DialogWindow):
         notes.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
         notes.columnconfigure(0, weight=1)
         notes.rowconfigure(1, weight=1)
-        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", padx=16, pady=(10, 8))
-        self.notes_text = ScrolledText(notes, height=10, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, font=ui_font(10), relief="flat", borderwidth=0)
+        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), justify="left", wraplength=720).pack(anchor="w", padx=16, pady=(10, 8))
+        self.notes_text = make_text_area(notes, height=180)
         self.notes_text.pack(fill="both", expand=True, padx=16, pady=(10, 16))
         self._set_notes("Release notes will appear here after the check.")
 
@@ -1324,7 +1356,7 @@ class UpdateDialog(DialogWindow):
         progress_row.columnconfigure(0, weight=1)
         self.progress = ttk.Progressbar(progress_row, variable=self.progress_var, maximum=100)
         self.progress.grid(row=0, column=0, sticky="ew", padx=(0, 10))
-        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, width=18, anchor="e").grid(row=0, column=1, sticky="e")
+        tk.Label(progress_row, textvariable=self.progress_text_var, bg=APP_BG, fg=SUBTEXT_FG, font=ui_font(11), width=18, anchor="e").grid(row=0, column=1, sticky="e")
 
         buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=1, column=0, sticky="ew")
@@ -1735,13 +1767,13 @@ class TrackerApp(AppRoot):
         header = tk.Frame(shell, bg=APP_BG, padx=20, pady=18)
         header.pack(fill="x")
         header.grid_columnconfigure(0, weight=1)
-        tk.Label(header, text=APP_NAME, bg=APP_BG, fg=HEADER_FG, font=ui_font(22, "bold", display=True)).grid(row=0, column=0, sticky="w")
+        tk.Label(header, text=APP_NAME, bg=APP_BG, fg=HEADER_FG, font=ui_font(23, "bold", display=True)).grid(row=0, column=0, sticky="w")
         tk.Label(
             header,
             text=f"v{APP_VERSION} / {get_execution_mode()}",
             bg=CARD_ALT_BG,
             fg=SUBTEXT_FG,
-            font=ui_font(10, "bold"),
+            font=ui_font(11, "bold"),
             padx=10,
             pady=4,
         ).grid(row=0, column=1, sticky="e")
@@ -1750,7 +1782,7 @@ class TrackerApp(AppRoot):
             text="Local creator analytics for posts, collections, and dashboard monitoring.",
             bg=APP_BG,
             fg=SUBTEXT_FG,
-            font=ui_font(11),
+            font=ui_font(12),
         ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
 
         body = tk.Frame(shell, bg=APP_BG, padx=16, pady=10)
@@ -1770,7 +1802,7 @@ class TrackerApp(AppRoot):
         frame.grid(row=row, column=column, columnspan=columnspan, sticky="nsew", padx=7, pady=7)
         if weight:
             parent.grid_rowconfigure(row, weight=weight)
-        tk.Label(frame, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+        tk.Label(frame, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).pack(anchor="w")
         return frame
 
     def _build_status_card(self, parent):
@@ -1786,17 +1818,17 @@ class TrackerApp(AppRoot):
 
         hero = tk.Frame(card, bg=CARD_BG)
         hero.pack(fill="x", pady=(8, 0))
-        self.status_dot = tk.Label(hero, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=ui_font(17, "bold"))
+        self.status_dot = tk.Label(hero, text="●", bg=CARD_BG, fg=STATUS_IDLE, font=ui_font(18, "bold"))
         self.status_dot.pack(side="left", anchor="n", padx=(0, 9))
         text_stack = tk.Frame(hero, bg=CARD_BG)
         text_stack.pack(side="left", fill="x", expand=True)
-        tk.Label(text_stack, textvariable=self.status_var, bg=CARD_BG, fg=HEADER_FG, font=ui_font(19, "bold")).pack(anchor="w")
+        tk.Label(text_stack, textvariable=self.status_var, bg=CARD_BG, fg=HEADER_FG, font=ui_font(20, "bold")).pack(anchor="w")
         tk.Label(
             text_stack,
             textvariable=self.status_summary_var,
             bg=CARD_BG,
             fg=SUBTEXT_FG,
-            font=ui_font(10),
+            font=ui_font(12),
             justify="left",
             wraplength=520,
         ).pack(anchor="w", pady=(2, 0))
@@ -1810,8 +1842,8 @@ class TrackerApp(AppRoot):
     def _build_status_tile(self, parent, label: str, var: tk.StringVar, row: int, column: int):
         tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=10, pady=8, highlightthickness=1, highlightbackground=BORDER_FG)
         tile.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0 if column == 1 else 6), pady=0)
-        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(9, "bold")).pack(anchor="w")
-        tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(10), wraplength=260, justify="left").pack(anchor="w", pady=(3, 0))
+        tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+        tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(12), wraplength=260, justify="left").pack(anchor="w", pady=(3, 0))
 
     def _build_actions_card(self, parent):
         card = self._make_card(parent, "ACTIONS", 0, 1)
@@ -1861,8 +1893,8 @@ class TrackerApp(AppRoot):
         for idx, (label, var) in enumerate(items):
             tile = tk.Frame(grid, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
             tile.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5, 0 if idx == len(items) - 1 else 5))
-            tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(9, "bold")).pack(anchor="w")
-            tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(11), wraplength=200, justify="left").pack(anchor="w", pady=(4, 0))
+            tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+            tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(12), wraplength=200, justify="left").pack(anchor="w", pady=(4, 0))
 
     def _build_log_card(self, parent):
         card = self._make_card(parent, "ACTIVITY", 2, 0, columnspan=2, weight=3)
@@ -1872,7 +1904,7 @@ class TrackerApp(AppRoot):
             textvariable=self.activity_summary_var,
             bg=CARD_BG,
             fg=SUBTEXT_FG,
-            font=ui_font(11),
+            font=ui_font(12),
             justify="left",
         ).pack(anchor="w", pady=(8, 0))
 
@@ -1883,7 +1915,17 @@ class TrackerApp(AppRoot):
 
         self.activity_canvas = tk.Canvas(timeline, bg=CARD_BG, height=260, highlightthickness=0, borderwidth=0)
         self.activity_canvas.grid(row=0, column=0, sticky="nsew")
-        scrollbar = ttk.Scrollbar(timeline, orient="vertical", command=self.activity_canvas.yview)
+        if CUSTOM_TK_AVAILABLE:
+            scrollbar = ctk.CTkScrollbar(
+                timeline,
+                orientation="vertical",
+                command=self.activity_canvas.yview,
+                fg_color=CARD_BG,
+                button_color=CARD_ALT_BG,
+                button_hover_color=ACCENT_HOVER_BG,
+            )
+        else:
+            scrollbar = ttk.Scrollbar(timeline, orient="vertical", command=self.activity_canvas.yview)
         scrollbar.grid(row=0, column=1, sticky="ns", padx=(8, 0))
         self.activity_canvas.configure(yscrollcommand=scrollbar.set)
 
@@ -1898,8 +1940,8 @@ class TrackerApp(AppRoot):
         footer = tk.Frame(shell, bg=FOOTER_BG, padx=16, pady=10)
         footer.pack(fill="x")
         footer.grid_columnconfigure(0, weight=1)
-        tk.Label(footer, textvariable=self.status_line_var, bg=FOOTER_BG, fg=SUBTEXT_FG, anchor="w").grid(row=0, column=0, sticky="ew")
-        tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg=FOOTER_BG, fg=SUBTEXT_FG, anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
+        tk.Label(footer, textvariable=self.status_line_var, bg=FOOTER_BG, fg=SUBTEXT_FG, font=ui_font(11), anchor="w").grid(row=0, column=0, sticky="ew")
+        tk.Label(footer, text=f"{APP_TITLE} / {get_execution_mode()}", bg=FOOTER_BG, fg=SUBTEXT_FG, font=ui_font(11), anchor="e").grid(row=0, column=1, sticky="e", padx=(12, 0))
 
     def _enqueue_log(self, message: str):
         self.log_queue.put(message)
@@ -1932,15 +1974,15 @@ class TrackerApp(AppRoot):
         timestamp = datetime.now().strftime("%H:%M:%S")
         meta = tk.Frame(row, bg=CARD_ALT_BG)
         meta.grid(row=0, column=0, sticky="nw", padx=(0, 12))
-        tk.Label(meta, text=timestamp, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(9, "bold")).pack(anchor="w")
-        tk.Label(meta, text=kind, bg=CARD_ALT_BG, fg=color, font=ui_font(10, "bold")).pack(anchor="w", pady=(4, 0))
+        tk.Label(meta, text=timestamp, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
+        tk.Label(meta, text=kind, bg=CARD_ALT_BG, fg=color, font=ui_font(11, "bold")).pack(anchor="w", pady=(4, 0))
 
         tk.Label(
             row,
             text=message,
             bg=CARD_ALT_BG,
             fg=HEADER_FG,
-            font=ui_font(11),
+            font=ui_font(12),
             justify="left",
             wraplength=760,
         ).grid(row=0, column=1, sticky="ew")

@@ -7,5 +7,7 @@ Recommended files:
 Supported formats: `.ttf` and `.otf`.
 
 The desktop app loads these fonts privately at startup on Windows and the
-PyInstaller build includes this folder in the portable package. Keep the font
-license files next to the fonts when adding distributable font files.
+PyInstaller build includes this folder in the portable package.
+
+Bundled fonts in this folder are distributed under the SIL Open Font License
+1.1. Keep `OFL.txt` next to the font files in release packages.
