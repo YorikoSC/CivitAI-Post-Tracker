@@ -19,6 +19,7 @@ The app keeps its runtime data on your machine. It can run from source or as a p
 - Windows is the primary target.
 - Python 3.11 or newer for source mode and local builds.
 - A CivitAI API key is recommended and required for collection tracking.
+- Desktop fonts are bundled with the app; users do not need to install them separately.
 
 ## API Key And Limited Mode
 

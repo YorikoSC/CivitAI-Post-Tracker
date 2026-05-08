@@ -1,6 +1,8 @@
 # -*- mode: python ; coding: utf-8 -*-
 
-from PyInstaller.utils.hooks import collect_submodules
+from pathlib import Path
+
+from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 
 hiddenimports = [
     'requests',
@@ -13,18 +15,24 @@ hiddenimports = [
     'engagement_dashboard',
 ]
 hiddenimports += collect_submodules('pystray')
+hiddenimports += collect_submodules('customtkinter')
+
+datas = [
+    ('config.example.json', '.'),
+    ('README.md', '.'),
+    ('DASHBOARD_GUIDE.md', '.'),
+    ('UPDATE_GUIDE.md', '.'),
+]
+if Path('assets/fonts').exists():
+    datas.append(('assets/fonts', 'assets/fonts'))
+datas += collect_data_files('customtkinter')
 
 
 a = Analysis(
     ['tracker_app.py'],
     pathex=[],
     binaries=[],
-    datas=[
-        ('config.example.json', '.'),
-        ('README.md', '.'),
-        ('DASHBOARD_GUIDE.md', '.'),
-        ('UPDATE_GUIDE.md', '.'),
-    ],
+    datas=datas,
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},

@@ -24,8 +24,9 @@ import buzz_ingest
 import update_manager
 from collection_runtime import compute_collection_mode, normalize_collection_tracking_config
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
-from config_utils import normalize_config
+from config_utils import normalize_config, run_startup_self_check
 from engagement_dashboard import render_collection_tables_html
+from tracker_app import format_elapsed_time, format_next_run_time
 from tracker_service import (
     TimezoneHelper,
     build_post_performance_rows,
@@ -51,6 +52,33 @@ from update_manager import (
     validate_portable_update_package,
     version_key,
 )
+
+
+class DesktopStatusFormattingSmokeTests(unittest.TestCase):
+    def test_next_run_time_shows_live_countdown(self) -> None:
+        now = datetime(2026, 5, 7, 12, 0, 0)
+        target = now + timedelta(minutes=2, seconds=5)
+
+        self.assertIn("in 2m 05s", format_next_run_time(target, now=now))
+
+    def test_last_success_time_shows_elapsed_label(self) -> None:
+        now = datetime(2026, 5, 7, 12, 10, 0)
+        last_success = now - timedelta(minutes=4, seconds=30)
+
+        self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
+
+
+class StartupSelfCheckSmokeTests(unittest.TestCase):
+    def test_logs_dir_stays_inside_runtime_dir(self) -> None:
+        runtime_dir = smoke_path("startup_self_check", "")
+        try:
+            runtime_dir.mkdir(parents=True, exist_ok=True)
+            report = run_startup_self_check(runtime_dir, runtime_dir, runtime_dir / "config.json", {})
+
+            self.assertEqual(report["details"]["logs_dir"], str(runtime_dir / "logs"))
+            self.assertTrue(report["details"]["logs_dir_writable"])
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 class UpdateManagerSmokeTests(unittest.TestCase):
@@ -322,14 +350,18 @@ class UpdateManagerSmokeTests(unittest.TestCase):
         spec = (ROOT / "civitai_tracker.spec").read_text(encoding="utf-8")
 
         self.assertIn("requests", requirements)
+        self.assertIn("customtkinter", requirements)
         self.assertIn("set \"PYTHON_EXE=%VENV_DIR%\\Scripts\\python.exe\"", build_script)
         self.assertIn("from app_info import APP_TITLE", build_script)
         self.assertIn("-m venv", build_script)
         self.assertIn("-m pip install -r requirements.txt", build_script)
         self.assertIn("-m pip install --upgrade pyinstaller", build_script)
-        self.assertIn("import requests", build_script)
+        self.assertIn("import requests, pystray, PIL, customtkinter", build_script)
         self.assertIn("-m PyInstaller --noconfirm --clean civitai_tracker.spec", build_script)
         self.assertIn("'requests'", spec)
+        self.assertIn("collect_data_files('customtkinter')", spec)
+        self.assertIn("collect_submodules('customtkinter')", spec)
+        self.assertIn("assets/fonts", spec)
 
 
 class CollectionParserSmokeTests(unittest.TestCase):
