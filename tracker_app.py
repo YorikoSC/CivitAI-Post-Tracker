@@ -430,7 +430,37 @@ def make_radio(parent: tk.Misc, text: str, variable: tk.StringVar, value: str, c
     return ttk.Radiobutton(parent, text=text, variable=variable, value=value, command=command, style="Card.TRadiobutton")
 
 
-def make_dialog_header(parent: tk.Misc, title: str, subtitle: str) -> tk.Frame:
+def make_dialog_header(parent: tk.Misc, title: str, subtitle: str):
+    if CUSTOM_TK_AVAILABLE:
+        header = ctk.CTkFrame(parent, fg_color=APP_BG, corner_radius=0)
+        header.grid_columnconfigure(0, weight=1)
+        ctk.CTkLabel(
+            header,
+            text=title,
+            text_color=HEADER_FG,
+            font=("Segoe UI", 22, "bold"),
+            anchor="w",
+        ).grid(row=0, column=0, sticky="w")
+        ctk.CTkLabel(
+            header,
+            text=f"v{APP_VERSION} / {get_execution_mode()}",
+            fg_color=CARD_ALT_BG,
+            text_color=SUBTEXT_FG,
+            font=("Segoe UI", 9, "bold"),
+            corner_radius=8,
+            padx=10,
+            pady=4,
+        ).grid(row=0, column=1, sticky="e")
+        ctk.CTkLabel(
+            header,
+            text=subtitle,
+            text_color=SUBTEXT_FG,
+            font=("Segoe UI", 10),
+            anchor="w",
+            justify="left",
+        ).grid(row=1, column=0, columnspan=2, sticky="w", pady=(4, 0))
+        return header
+
     header = tk.Frame(parent, bg=APP_BG, padx=4, pady=4)
     header.grid_columnconfigure(0, weight=1)
     tk.Label(header, text=title, bg=APP_BG, fg=HEADER_FG, font=("Segoe UI", 22, "bold")).grid(row=0, column=0, sticky="w")
@@ -454,14 +484,59 @@ def make_dialog_header(parent: tk.Misc, title: str, subtitle: str) -> tk.Frame:
     return header
 
 
-def make_panel(parent: tk.Misc, title: str | None = None, *, padx: int = 16, pady: int = 16) -> tk.Frame:
+def make_panel(parent: tk.Misc, title: str | None = None, *, padx: int = 16, pady: int = 16):
+    if CUSTOM_TK_AVAILABLE:
+        panel = ctk.CTkFrame(
+            parent,
+            fg_color=CARD_BG,
+            corner_radius=12,
+            border_width=1,
+            border_color=BORDER_FG,
+        )
+        if title:
+            ctk.CTkLabel(
+                panel,
+                text=title,
+                text_color=SUBTEXT_FG,
+                font=("Segoe UI", 9, "bold"),
+                anchor="w",
+            ).pack(anchor="w", padx=padx, pady=(pady, 0))
+        return panel
+
     panel = tk.Frame(parent, bg=CARD_BG, padx=padx, pady=pady, highlightthickness=1, highlightbackground=BORDER_FG)
     if title:
         tk.Label(panel, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=("Segoe UI", 9, "bold")).pack(anchor="w")
     return panel
 
 
-def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, column: int, *, wraplength: int = 220) -> tk.Frame:
+def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, column: int, *, wraplength: int = 220):
+    if CUSTOM_TK_AVAILABLE:
+        tile = ctk.CTkFrame(
+            parent,
+            fg_color=CARD_ALT_BG,
+            corner_radius=10,
+            border_width=1,
+            border_color=BORDER_FG,
+        )
+        tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
+        ctk.CTkLabel(
+            tile,
+            text=label,
+            text_color=SUBTEXT_FG,
+            font=("Segoe UI", 8, "bold"),
+            anchor="w",
+        ).pack(anchor="w", padx=12, pady=(10, 0))
+        ctk.CTkLabel(
+            tile,
+            textvariable=var,
+            text_color=HEADER_FG,
+            font=("Segoe UI", 10),
+            wraplength=wraplength,
+            justify="left",
+            anchor="w",
+        ).pack(anchor="w", padx=12, pady=(4, 10))
+        return tile
+
     tile = tk.Frame(parent, bg=CARD_ALT_BG, padx=12, pady=10, highlightthickness=1, highlightbackground=BORDER_FG)
     tile.grid(row=row, column=column, sticky="nsew", padx=5, pady=5)
     tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=("Segoe UI", 8, "bold")).pack(anchor="w")
@@ -667,8 +742,16 @@ class SettingsDialog(DialogWindow):
 
     def _make_tab(self, notebook, title: str) -> tk.Frame:
         if CUSTOM_TK_AVAILABLE:
-            frame = notebook.add(title)
-            frame.configure(fg_color=CARD_BG)
+            tab = notebook.add(title)
+            tab.configure(fg_color=CARD_BG)
+            frame = ctk.CTkScrollableFrame(
+                tab,
+                fg_color=CARD_BG,
+                corner_radius=0,
+                scrollbar_button_color=CARD_ALT_BG,
+                scrollbar_button_hover_color="#1b2947",
+            )
+            frame.pack(fill="both", expand=True, padx=18, pady=18)
         else:
             frame = tk.Frame(notebook, bg=CARD_BG, padx=18, pady=18, highlightthickness=1, highlightbackground=BORDER_FG)
             notebook.add(frame, text=title)
@@ -970,7 +1053,7 @@ class DiagnosticsDialog(DialogWindow):
             fg=HEADER_FG,
             font=("Segoe UI", 15, "bold"),
             justify="left",
-        ).pack(anchor="w", pady=(10, 0))
+        ).pack(anchor="w", padx=16, pady=(10, 0))
         tk.Label(
             overview,
             text="Use the tiles below for a quick health check. The full technical report is kept in Details.",
@@ -979,19 +1062,19 @@ class DiagnosticsDialog(DialogWindow):
             font=("Segoe UI", 10),
             justify="left",
             wraplength=760,
-        ).pack(anchor="w", pady=(6, 0))
+        ).pack(anchor="w", padx=16, pady=(6, 16))
 
         checks = make_panel(wrapper, "CHECKS")
         checks.grid(row=2, column=0, sticky="nsew", pady=(0, 10))
         grid = tk.Frame(checks, bg=CARD_BG)
-        grid.pack(fill="x", pady=(10, 0))
+        grid.pack(fill="x", padx=11, pady=(10, 16))
         grid.columnconfigure((0, 1, 2), weight=1)
         self._build_check_tiles(grid)
 
         details = make_panel(wrapper, "DETAILS")
         details.grid(row=3, column=0, sticky="nsew")
         self.text = ScrolledText(details, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
-        self.text.pack(fill="both", expand=True, pady=(10, 0))
+        self.text.pack(fill="both", expand=True, padx=16, pady=(10, 16))
         self.text.insert("1.0", format_startup_self_check(self.report))
         self.text.configure(state="disabled")
 
@@ -1068,6 +1151,8 @@ class UpdateDialog(DialogWindow):
         self.downloaded_path: Path | None = None
         self.downloaded_package_ready = False
         self.is_busy = False
+        self._after_ids: set[str] = set()
+        self.check_after_id = None
 
         self.status_var = tk.StringVar(value="Ready to check.")
         self.current_var = tk.StringVar(value=f"v{APP_VERSION}")
@@ -1082,8 +1167,36 @@ class UpdateDialog(DialogWindow):
         self._build()
         self.transient(master)
         self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
-        self.after(150, self.check_now)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        self.check_after_id = self._schedule(150, self.check_now)
+
+    def _schedule(self, delay_ms: int, callback, *args):
+        after_id = ""
+
+        def dispatch():
+            self._after_ids.discard(after_id)
+            try:
+                if self.winfo_exists():
+                    callback(*args)
+            except tk.TclError:
+                pass
+
+        after_id = self.after(delay_ms, dispatch)
+        self._after_ids.add(after_id)
+        return after_id
+
+    def _cancel_scheduled_callbacks(self):
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except tk.TclError:
+                pass
+            self._after_ids.discard(after_id)
+
+    def destroy(self):
+        if hasattr(self, "_after_ids"):
+            self._cancel_scheduled_callbacks()
+        super().destroy()
 
     def _build(self):
         set_surface_color(self, APP_BG)
@@ -1121,7 +1234,7 @@ class UpdateDialog(DialogWindow):
         path_panel = make_panel(wrapper, "UPDATE PATH")
         path_panel.grid(row=2, column=0, sticky="ew", pady=(4, 10))
         path_grid = tk.Frame(path_panel, bg=CARD_BG)
-        path_grid.pack(fill="x", pady=(10, 0))
+        path_grid.pack(fill="x", padx=11, pady=(10, 16))
         path_grid.columnconfigure((0, 1), weight=1)
         make_metric_tile(path_grid, "Package source", self.source_var, 0, 0, wraplength=300)
         make_metric_tile(path_grid, "Next action", self.path_var, 0, 1, wraplength=300)
@@ -1130,9 +1243,9 @@ class UpdateDialog(DialogWindow):
         notes.grid(row=3, column=0, sticky="nsew", pady=(0, 10))
         notes.columnconfigure(0, weight=1)
         notes.rowconfigure(1, weight=1)
-        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", pady=(10, 8))
+        tk.Label(notes, textvariable=self.notes_hint_var, bg=CARD_BG, fg=SUBTEXT_FG, justify="left", wraplength=720).pack(anchor="w", padx=16, pady=(10, 8))
         self.notes_text = ScrolledText(notes, height=10, wrap="word", bg=INPUT_BG, fg=HEADER_FG, insertbackground=HEADER_FG, relief="flat", borderwidth=0)
-        self.notes_text.pack(fill="both", expand=True, pady=(10, 0))
+        self.notes_text.pack(fill="both", expand=True, padx=16, pady=(10, 16))
         self._set_notes("Release notes will appear here after the check.")
 
         footer.columnconfigure(0, weight=1)
@@ -1151,15 +1264,18 @@ class UpdateDialog(DialogWindow):
         self.select_btn = make_button(buttons, "Select ZIP", self.select_local_package)
         self.apply_btn = make_button(buttons, "Apply update", self.apply_update, kind="primary", state="disabled")
         self.downloads_btn = make_button(buttons, "Open downloads", self.open_downloads)
-        self.close_btn = make_button(buttons, "Close", self.destroy)
-        buttons.columnconfigure(5, weight=1)
-        self.check_btn.grid(row=0, column=0, sticky="w", padx=(0, 8), pady=2)
-        self.release_btn.grid(row=0, column=1, sticky="w", padx=(0, 8), pady=2)
-        self.download_btn.grid(row=0, column=2, sticky="w", padx=(0, 8), pady=2)
-        self.select_btn.grid(row=0, column=3, sticky="w", padx=(0, 8), pady=2)
-        self.apply_btn.grid(row=1, column=0, columnspan=2, sticky="w", padx=(0, 8), pady=(6, 0))
-        self.downloads_btn.grid(row=1, column=2, sticky="w", padx=(0, 8), pady=(6, 0))
-        self.close_btn.grid(row=1, column=5, sticky="e", pady=(6, 0))
+        self.close_btn = make_button(buttons, "Close", self._close)
+        buttons.columnconfigure((0, 1, 2, 3), weight=1, uniform="update_actions")
+        self.check_btn.grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=3)
+        self.release_btn.grid(row=0, column=1, sticky="ew", padx=6, pady=3)
+        self.download_btn.grid(row=0, column=2, sticky="ew", padx=6, pady=3)
+        self.select_btn.grid(row=0, column=3, sticky="ew", padx=(6, 0), pady=3)
+        self.apply_btn.grid(row=1, column=0, sticky="ew", padx=(0, 6), pady=(6, 0))
+        self.downloads_btn.grid(row=1, column=1, sticky="ew", padx=6, pady=(6, 0))
+        self.close_btn.grid(row=1, column=3, sticky="ew", padx=(6, 0), pady=(6, 0))
+
+    def _close(self):
+        self.destroy()
 
     def _set_update_path(self, source: str, path: str, hint: str | None = None):
         self.source_var.set(source)
@@ -1175,7 +1291,7 @@ class UpdateDialog(DialogWindow):
 
     def _run_on_ui(self, callback, *args):
         try:
-            self.after(0, lambda: self._dispatch_on_ui(callback, *args))
+            self._schedule(0, self._dispatch_on_ui, callback, *args)
         except tk.TclError:
             pass
 
@@ -1454,7 +1570,10 @@ class UpdateDialog(DialogWindow):
         master = self.master
         self.destroy()
         if hasattr(master, "exit_app"):
-            master.after(100, master.exit_app)
+            if hasattr(master, "_schedule"):
+                master._schedule(100, master.exit_app)
+            else:
+                master.after(100, master.exit_app)
 
 
 class TrackerApp(AppRoot):
@@ -1474,9 +1593,10 @@ class TrackerApp(AppRoot):
         self.last_diagnostics_report: dict | None = None
         self.tray_icon = None
         self._closing_to_tray = True
+        self._after_ids: set[str] = set()
         self._build_ui()
-        self.after(400, self._pump_logs)
-        self.after(1000, self._refresh_status)
+        self._schedule(400, self._pump_logs)
+        self._schedule(1000, self._refresh_status)
 
         self.config_data = load_json_config(self.config_path) if self.config_path.exists() else default_config()
         self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
@@ -1488,7 +1608,7 @@ class TrackerApp(AppRoot):
             )
 
         if not self.config_path.exists():
-            self.after(250, self.open_settings)
+            self._schedule(250, self.open_settings)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.runner.set_app_mode("window")
@@ -1497,14 +1617,42 @@ class TrackerApp(AppRoot):
 
         launch_hidden = bool(minimized or deep_get(self.config_data, "options.start_minimized", False))
         if launch_hidden:
-            self.after(350, self.hide_to_tray)
+            self._schedule(350, self.hide_to_tray)
         else:
-            self.after(350, self.show_from_tray)
+            self._schedule(350, self.show_from_tray)
 
         if deep_get(self.config_data, "options.start_auto_polling_on_launch", False):
-            self.after(700 if launch_hidden else 450, self._start_auto_on_launch)
+            self._schedule(700 if launch_hidden else 450, self._start_auto_on_launch)
         if deep_get(self.config_data, "options.check_updates_on_launch", True):
-            self.after(1800, self._check_updates_on_launch)
+            self._schedule(1800, self._check_updates_on_launch)
+
+    def _schedule(self, delay_ms: int, callback, *args):
+        after_id = ""
+
+        def dispatch():
+            self._after_ids.discard(after_id)
+            try:
+                if self.winfo_exists():
+                    callback(*args)
+            except tk.TclError:
+                pass
+
+        after_id = self.after(delay_ms, dispatch)
+        self._after_ids.add(after_id)
+        return after_id
+
+    def _cancel_scheduled_callbacks(self):
+        for after_id in list(self._after_ids):
+            try:
+                self.after_cancel(after_id)
+            except tk.TclError:
+                pass
+            self._after_ids.discard(after_id)
+
+    def destroy(self):
+        if hasattr(self, "_after_ids"):
+            self._cancel_scheduled_callbacks()
+        super().destroy()
 
     def _build_ui(self):
         apply_desktop_theme(self)
@@ -1744,7 +1892,7 @@ class TrackerApp(AppRoot):
                 self._set_status_line(line)
         except queue.Empty:
             pass
-        self.after(400, self._pump_logs)
+        self._schedule(400, self._pump_logs)
 
     def _status_color(self, snap) -> str:
         if snap.is_running:
@@ -1791,7 +1939,7 @@ class TrackerApp(AppRoot):
             self.start_auto_btn.configure(state="disabled" if snap.auto_polling else "normal")
             self.stop_auto_btn.configure(state="normal" if snap.auto_polling else "disabled")
 
-        self.after(1000, self._refresh_status)
+        self._schedule(1000, self._refresh_status)
 
     def run_now(self):
         threading.Thread(target=self.runner.run_once, daemon=True).start()
@@ -1852,10 +2000,7 @@ class TrackerApp(AppRoot):
             return
         latest = info.latest_tag or info.latest_version
         self._enqueue_log(f"Update available: {latest}. Open Updates to download it.")
-        try:
-            self.after(0, lambda: self._set_status_line(f"Update available: {latest}."))
-        except tk.TclError:
-            pass
+        self._schedule(0, self._set_status_line, f"Update available: {latest}.")
 
     def _apply_startup_diagnostics(self, hidden_launch: bool):
         report = self.last_diagnostics_report or {}
@@ -1868,7 +2013,7 @@ class TrackerApp(AppRoot):
         for item in report.get("warnings", []):
             self._enqueue_log(f"Warning: {item}")
         if report.get("critical_count", 0) and not hidden_launch:
-            self.after(900, lambda: messagebox.showwarning(
+            self._schedule(900, lambda: messagebox.showwarning(
                 "Startup self-check",
                 summary + "\n\nOpen Diagnostics for details.",
                 parent=self,
@@ -1926,18 +2071,18 @@ class TrackerApp(AppRoot):
             menu = pystray.Menu(
                 pystray.MenuItem(
                     "Open",
-                    lambda icon, item: self.after(0, self.show_from_tray),
+                    lambda icon, item: self._schedule(0, self.show_from_tray),
                     default=True,
                     visible=False,
                 ),
-                pystray.MenuItem("Open", lambda icon, item: self.after(0, self.show_from_tray)),
-                pystray.MenuItem("Run now", lambda icon, item: self.after(0, self.run_now)),
-                pystray.MenuItem("Start auto polling", lambda icon, item: self.after(0, self.start_auto)),
-                pystray.MenuItem("Stop auto polling", lambda icon, item: self.after(0, self.stop_auto)),
-                pystray.MenuItem("Open dashboard", lambda icon, item: self.after(0, self.open_dashboard)),
-                pystray.MenuItem("Diagnostics", lambda icon, item: self.after(0, self.open_diagnostics)),
-                pystray.MenuItem("Updates", lambda icon, item: self.after(0, self.open_updates)),
-                pystray.MenuItem("Exit", lambda icon, item: self.after(0, self.exit_app)),
+                pystray.MenuItem("Open", lambda icon, item: self._schedule(0, self.show_from_tray)),
+                pystray.MenuItem("Run now", lambda icon, item: self._schedule(0, self.run_now)),
+                pystray.MenuItem("Start auto polling", lambda icon, item: self._schedule(0, self.start_auto)),
+                pystray.MenuItem("Stop auto polling", lambda icon, item: self._schedule(0, self.stop_auto)),
+                pystray.MenuItem("Open dashboard", lambda icon, item: self._schedule(0, self.open_dashboard)),
+                pystray.MenuItem("Diagnostics", lambda icon, item: self._schedule(0, self.open_diagnostics)),
+                pystray.MenuItem("Updates", lambda icon, item: self._schedule(0, self.open_updates)),
+                pystray.MenuItem("Exit", lambda icon, item: self._schedule(0, self.exit_app)),
             )
             self.tray_icon = pystray.Icon("civitai_tracker", self._create_tray_image(), "CivitAI Tracker", menu)
             self.tray_icon.run_detached()
@@ -1963,9 +2108,9 @@ class TrackerApp(AppRoot):
             pass
         self._force_show_main_window()
         self.runner.set_app_mode("window")
-        self.after(50, self.lift)
-        self.after(100, self.focus_force)
-        self.after(150, self._force_show_main_window)
+        self._schedule(50, self.lift)
+        self._schedule(100, self.focus_force)
+        self._schedule(150, self._force_show_main_window)
 
     def _force_show_main_window(self):
         if not sys.platform.startswith("win"):
@@ -2048,7 +2193,7 @@ def main():
     try:
         app = TrackerApp(minimized=args.minimized)
         if args.setup:
-            app.after(200, app.open_settings)
+            app._schedule(200, app.open_settings)
         app.mainloop()
         return 0
     finally:
