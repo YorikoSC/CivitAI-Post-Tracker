@@ -34,19 +34,21 @@ Do not include API keys, private database files, or unredacted local paths unles
 Install dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+.\install_requirements.bat
 ```
 
 Run the app from source:
 
 ```powershell
-python tracker_app.py
+.\launch_tracker.pyw
 ```
+
+Use `.\launch_tracker.bat` only when you need console startup diagnostics.
 
 Run smoke tests:
 
 ```powershell
-python tests\smoke_tests.py
+.venv\Scripts\python.exe tests\smoke_tests.py
 ```
 
 Build the portable EXE package:
@@ -68,7 +70,7 @@ Pull requests should:
 Before opening a pull request, run:
 
 ```powershell
-python tests\smoke_tests.py
+.venv\Scripts\python.exe tests\smoke_tests.py
 git diff --check
 ```
 

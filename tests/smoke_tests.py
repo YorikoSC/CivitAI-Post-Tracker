@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sqlite3
 import shutil
 import subprocess
@@ -24,9 +25,10 @@ import buzz_ingest
 import update_manager
 from collection_runtime import compute_collection_mode, normalize_collection_tracking_config
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
-from config_utils import normalize_config, run_startup_self_check
+from config_utils import normalize_config, normalize_poll_minutes, run_startup_self_check
 from engagement_dashboard import render_collection_tables_html
 from tracker_app import format_elapsed_time, format_next_run_time
+from tracker_runner import TrackerRunner
 from tracker_service import (
     TimezoneHelper,
     build_post_performance_rows,
@@ -66,6 +68,46 @@ class DesktopStatusFormattingSmokeTests(unittest.TestCase):
         last_success = now - timedelta(minutes=4, seconds=30)
 
         self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
+
+
+class TrackerRunnerRuntimeStatusSmokeTests(unittest.TestCase):
+    def test_runner_preserves_previous_success_status_on_startup(self) -> None:
+        runtime_dir = smoke_path("runner_status", "")
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            previous_success = "2026-05-07T12:00:00+00:00"
+            previous_started = "2026-05-07T11:59:00+00:00"
+            (runtime_dir / "runtime_status.json").write_text(
+                json.dumps(
+                    {
+                        "last_success_at": previous_success,
+                        "last_started_at": previous_started,
+                        "last_error": "Previous recoverable error",
+                        "last_exit_code": 1,
+                        "selected_host": "https://civitai.red",
+                        "auto_polling": True,
+                        "next_run_at": "2026-05-07T12:15:00+00:00",
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            runner = TrackerRunner(runtime_dir, "config.json")
+            snap = runner.snapshot()
+            persisted = json.loads((runtime_dir / "runtime_status.json").read_text(encoding="utf-8"))
+
+            self.assertEqual(snap.last_success_at.isoformat(), previous_success)
+            self.assertEqual(snap.last_started_at.isoformat(), previous_started)
+            self.assertEqual(snap.last_error, "Previous recoverable error")
+            self.assertEqual(snap.last_exit_code, 1)
+            self.assertEqual(snap.selected_host, "https://civitai.red")
+            self.assertFalse(snap.auto_polling)
+            self.assertIsNone(snap.next_run_at)
+            self.assertEqual(persisted["last_success_at"], previous_success)
+            self.assertFalse(persisted["auto_polling"])
+            self.assertIsNone(persisted["next_run_at"])
+        finally:
+            shutil.rmtree(runtime_dir, ignore_errors=True)
 
 
 class StartupSelfCheckSmokeTests(unittest.TestCase):
@@ -385,6 +427,143 @@ class CollectionParserSmokeTests(unittest.TestCase):
         date_marker_only = {"result": {"data": {"json": {"transactions": []}, "meta": {"values": {"cursor": ["Date"]}}}}}
         self.assertIsNone(buzz_ingest.extract_next_cursor(date_marker_only, []))
 
+    def test_collection_events_do_not_store_personal_actor_fields(self) -> None:
+        tx = {
+            "date": "2026-05-08T12:00:00Z",
+            "amount": 1,
+            "description": "Collected content",
+            "details": {
+                "type": "collectedContent:image",
+                "byUserId": 12345,
+                "entityId": 98765,
+                "entityType": "Image",
+            },
+            "toUser": {
+                "id": 777,
+                "username": "creator-name",
+            },
+        }
+
+        event = buzz_ingest.core_event_from_transaction(tx, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+
+        self.assertIsNotNone(event)
+        self.assertIsNone(event["by_user_id"])
+        self.assertIsNone(event["to_user_id"])
+        self.assertIsNone(event["to_username"])
+        self.assertIsNone(event["description"])
+        self.assertNotIn("byUserId", event["raw_json"])
+        self.assertNotIn("toUser", event["raw_json"])
+        self.assertNotIn("description", event["raw_json"])
+        self.assertNotIn("creator-name", event["raw_json"])
+        self.assertNotIn('"id":777', event["raw_json"])
+        stored_payload = json.loads(event["raw_json"])
+        self.assertEqual(stored_payload["details"]["entityId"], 98765)
+        self.assertEqual(stored_payload["details"]["type"], "collectedContent:image")
+
+    def test_collection_event_key_uses_target_not_actor_identity(self) -> None:
+        base_tx = {
+            "date": "2026-05-08T12:00:00Z",
+            "amount": 1,
+            "details": {
+                "type": "collectedContent:image",
+                "byUserId": 12345,
+                "entityId": 98765,
+                "entityType": "Image",
+            },
+            "toUser": {
+                "id": 777,
+                "username": "creator-name",
+            },
+        }
+        same_target_other_actor = json.loads(json.dumps(base_tx))
+        same_target_other_actor["details"]["byUserId"] = 54321
+        same_target_other_actor["toUser"] = {"id": 888, "username": "other-name"}
+        other_target = json.loads(json.dumps(base_tx))
+        other_target["details"]["entityId"] = 98766
+
+        first = buzz_ingest.core_event_from_transaction(base_tx, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+        second = buzz_ingest.core_event_from_transaction(same_target_other_actor, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+        third = buzz_ingest.core_event_from_transaction(other_target, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+
+        self.assertEqual(first["event_key"], second["event_key"])
+        self.assertNotEqual(first["event_key"], third["event_key"])
+
+    def test_collection_schema_cleanup_redacts_existing_personal_fields(self) -> None:
+        db_path = smoke_path("collection_privacy_cleanup", ".db")
+        try:
+            buzz_ingest.init_content_engagement_schema(str(db_path))
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO content_engagement_events (
+                        event_key, captured_at, event_time, host, account_type,
+                        raw_type, normalized_type, amount, description,
+                        by_user_id, target_id, target_entity_id, target_entity_type,
+                        target_type_candidate, to_user_id, to_username,
+                        related_image_id, related_post_id, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "legacy-key",
+                        "2026-05-08T12:01:00Z",
+                        "2026-05-08T12:00:00Z",
+                        "https://civitai.red",
+                        "blue",
+                        "collectedContent:image",
+                        "collection_like",
+                        1,
+                        "Collected content",
+                        12345,
+                        98765,
+                        98765,
+                        "Image",
+                        "image",
+                        777,
+                        "creator-name",
+                        98765,
+                        None,
+                        '{"details":{"type":"collectedContent:image","byUserId":12345,"entityId":98765},"toUser":{"id":777,"username":"creator-name"}}',
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            buzz_ingest.init_content_engagement_schema(str(db_path))
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT by_user_id, to_user_id, to_username, description, target_id, related_image_id, raw_json
+                    FROM content_engagement_events
+                    WHERE event_key = 'legacy-key'
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertIsNotNone(row)
+            self.assertIsNone(row[0])
+            self.assertIsNone(row[1])
+            self.assertIsNone(row[2])
+            self.assertIsNone(row[3])
+            self.assertEqual(row[4], 98765)
+            self.assertEqual(row[5], 98765)
+            self.assertNotIn("byUserId", row[6])
+            self.assertNotIn("toUser", row[6])
+            self.assertNotIn("description", row[6])
+            self.assertNotIn("creator-name", row[6])
+            self.assertNotIn('"id":777', row[6])
+            stored_payload = json.loads(row[6])
+            self.assertEqual(stored_payload["details"]["entityId"], 98765)
+            self.assertEqual(stored_payload["details"]["type"], "collectedContent:image")
+        finally:
+            try:
+                db_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
 
 class CollectionConfigSmokeTests(unittest.TestCase):
     def test_legacy_collection_config_is_normalized(self) -> None:
@@ -432,6 +611,12 @@ class CollectionConfigSmokeTests(unittest.TestCase):
         cfg = normalize_config({})
 
         self.assertTrue(cfg["options"]["check_updates_on_launch"])
+
+    def test_polling_interval_has_respectful_floor(self) -> None:
+        self.assertEqual(normalize_poll_minutes(1), 5)
+        self.assertEqual(normalize_poll_minutes(5), 5)
+        self.assertEqual(normalize_poll_minutes(15), 15)
+        self.assertEqual(normalize_poll_minutes("not-a-number"), 15)
 
 
 class CollectionStateSmokeTests(unittest.TestCase):
@@ -622,6 +807,21 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertIn("Daily activity", rendered)
         self.assertIn("Reaction mix today", rendered)
         self.assertIn("Top 7-day movement", rendered)
+        self.assertIn("Performance board", rendered)
+        self.assertIn("Recent momentum", rendered)
+        self.assertIn("Collection movers", rendered)
+        self.assertIn("Fresh posts", rendered)
+        self.assertIn("Full performance table", rendered)
+        self.assertIn("class='performance-post-card'", rendered)
+        self.assertIn("Timing board", rendered)
+        self.assertIn("Best hours", rendered)
+        self.assertIn("Best weekdays", rendered)
+        self.assertIn("class='timing-card-panel'", rendered)
+        self.assertIn("History board", rendered)
+        self.assertIn("All-time leaders", rendered)
+        self.assertIn("First-day leaders", rendered)
+        self.assertIn("class='history-post-card'", rendered)
+        self.assertIn("data-post-detail-id='1002'", rendered)
         self.assertIn("data-workspace-period='day'", rendered)
         self.assertIn("data-workspace-period='week'", rendered)
         self.assertIn("data-workspace-period='month'", rendered)
@@ -778,7 +978,7 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertIn("/width=450/2001.jpeg", normalized["thumbnail_url"])
         self.assertNotIn("avatars.githubusercontent.com", normalized["thumbnail_url"])
 
-    def test_collection_tables_link_image_only_rows_to_image_page(self) -> None:
+    def test_collection_workspace_renders_cards_and_image_only_links(self) -> None:
         db_path = smoke_path("collection_dashboard", ".db")
         conn = sqlite3.connect(db_path)
         try:
@@ -809,9 +1009,29 @@ class DashboardSmokeTests(unittest.TestCase):
                 """
                 INSERT INTO content_engagement_events (
                     event_time, normalized_type, target_id, related_image_id, related_post_id, by_user_id
-                ) VALUES (?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)
                 """,
-                (datetime.now(timezone.utc).replace(microsecond=0).isoformat(), "collection_like", 123456, None, None, 42),
+                (
+                    datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "collection_like",
+                    222222,
+                    222222,
+                    1001,
+                    42,
+                    datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
+                    "collection_like",
+                    123456,
+                    None,
+                    None,
+                    43,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO post_snapshots (post_id, title, published_at)
+                VALUES (?, ?, ?)
+                """,
+                (1001, "Mapped post", "2026-05-08T10:00:00+00:00"),
             )
             conn.commit()
         finally:
@@ -826,14 +1046,30 @@ class DashboardSmokeTests(unittest.TestCase):
                 pass
 
         self.assertIn('href="https://civitai.red/images/123456"', rendered)
+        self.assertIn('href="https://civitai.red/posts/1001"', rendered)
+        self.assertIn("Collection overview", rendered)
+        self.assertIn("Image-only events", rendered)
+        self.assertIn("Collection board", rendered)
+        self.assertIn("Recent collection flow", rendered)
+        self.assertIn("Top affected posts", rendered)
+        self.assertIn("Top collected images", rendered)
+        self.assertIn("Image-only queue", rendered)
+        self.assertIn("data-workspace-row", rendered)
+        self.assertIn("data-collection-detail-id", rendered)
+        self.assertIn("data-collection-detail-template", rendered)
+        self.assertLess(rendered.index("Top collected images"), rendered.index("Collection board"))
         self.assertIn("class='preview-link'", rendered)
         self.assertIn("Preview unavailable or restricted", rendered)
         self.assertIn("data-period-all='1'", rendered)
         self.assertIn("data-period-day='1'", rendered)
+        self.assertIn("Mapped to local post", rendered)
+        self.assertIn("This view uses image and post identifiers only.", rendered)
         self.assertIn("Post mapping not found locally", rendered)
         self.assertNotIn("Actor ID", rendered)
         self.assertNotIn("by_user_id", rendered)
         self.assertNotIn("Image not matched", rendered)
+        self.assertNotIn("Recent mapped activity", rendered)
+        self.assertNotIn("<table", rendered)
 
 
 if __name__ == "__main__":

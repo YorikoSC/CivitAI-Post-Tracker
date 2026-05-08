@@ -1,6 +1,6 @@
 # CivitAI Tracker
 
-A local Windows-first desktop app for tracking CivitAI post performance, collection activity, CSV snapshots, and a generated HTML dashboard.
+A Windows-first local desktop app for tracking CivitAI post performance, collection activity, CSV snapshots, and a generated HTML dashboard.
 
 The app keeps its runtime data on your machine. It can run from source or as a portable PyInstaller EXE build.
 
@@ -25,8 +25,8 @@ The source code is licensed under the MIT License. That license grants broad rig
 
 - Tracks CivitAI posts from a configured start point.
 - Stores current reaction/comment totals and historical snapshots in SQLite.
-- Exports CSV snapshots.
-- Generates a local HTML dashboard with performance tables, preview thumbnails, charts, and collection analytics.
+- Exports local CSV snapshots.
+- Generates a local HTML dashboard with boards, tables, preview thumbnails, charts, and collection analytics.
 - Tracks collection additions for your images when authenticated access is available.
 - Runs manual checks or automatic polling from a tray-enabled desktop UI.
 - Checks GitHub Releases for portable EXE updates.
@@ -60,7 +60,7 @@ The key can be stored inline in `config.json` or in a separate file such as `api
 Install dependencies:
 
 ```powershell
-python -m pip install -r requirements.txt
+.\install_requirements.bat
 ```
 
 Create `config.json` from `config.example.json`, then launch:
@@ -69,17 +69,23 @@ Create `config.json` from `config.example.json`, then launch:
 .\launch_tracker.pyw
 ```
 
-For troubleshooting with a visible console:
+For fallback startup with console diagnostics:
 
 ```powershell
-python tracker_app.py
+.\launch_tracker.bat
 ```
 
-`launch_tracker.bat` is also available as a console-backed launcher fallback.
+For direct development troubleshooting:
+
+```powershell
+.\dev_run_tracker.bat
+```
+
+`launch_tracker.pyw` is the supported no-console source launcher. The `.bat` launchers are fallback tools for setup and startup diagnostics.
 
 ## Quick Start: EXE Mode
 
-Build the portable app:
+Build the portable app locally:
 
 ```powershell
 build_exe.bat
@@ -103,7 +109,7 @@ The package is written to `release\CivitAITracker-v<version>-win64.zip`.
 
 ## Configuration Basics
 
-The most important settings live in `config.json`:
+The most important settings live in `config.json`. Start from `config.example.json` and edit the values you need:
 
 ```json
 {
@@ -130,6 +136,8 @@ The most important settings live in `config.json`:
 
 Collection tracking options are under `collection_tracking`. The default config separates the first bootstrap sync from later maintenance syncs:
 
+Automatic polling is intentionally conservative. The default is 15 minutes, and values below 5 minutes are raised to 5 minutes to avoid overly frequent CivitAI requests. Dashboard auto-refresh reloads the local HTML page every 5 minutes; it does not start a new CivitAI fetch by itself.
+
 ```json
 {
   "collection_tracking": {
@@ -143,7 +151,7 @@ Collection tracking options are under `collection_tracking`. The default config 
 }
 ```
 
-Older configs are normalized at load time. `options.enable_buzz_ingest` is still accepted as a compatibility alias for `options.enable_collection_tracking`, but new configs should use `enable_collection_tracking`.
+Legacy config keys are normalized at load time. New configs should use `options.enable_collection_tracking`.
 
 ## Dashboard
 
@@ -154,15 +162,17 @@ The dashboard is generated as `dashboard.html` and opened from the desktop app. 
 - daily and weekly movement;
 - visual overview charts;
 - suggested posting windows;
-- post performance table with quick period filters;
-- collection activity tables;
+- post performance board and full table with quick period filters;
+- timing board for best posting hours and weekdays;
+- history board for all-time and early-window leaders;
+- collection activity cards, image queues, and collection context;
 - thumbnail previews and post detail drawer when image metadata is available.
 
 See `DASHBOARD_GUIDE.md` for interpretation notes and known limits.
 
 ## Updates
 
-Source-mode users update through Git.
+Source-mode users update through Git, then rerun `install_requirements.bat`.
 
 EXE users can use **Updates** in the app to check the latest GitHub Release, download a compatible portable ZIP package, and apply it automatically. Automatic apply is available only in the packaged EXE build.
 
@@ -200,7 +210,7 @@ Open **Diagnostics** in the app first. It checks configuration, paths, API-key a
 Run smoke tests:
 
 ```powershell
-python tests\smoke_tests.py
+.venv\Scripts\python.exe tests\smoke_tests.py
 ```
 
 Check the latest run summary:

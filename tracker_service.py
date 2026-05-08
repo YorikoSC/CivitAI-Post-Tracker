@@ -20,7 +20,7 @@ from buzz_ingest import run_b2_1_ingest
 from engagement_correlation import run_b2_2_correlation
 from engagement_dashboard import COLLECTION_SECTION_CSS, render_collection_dashboard_section, render_collection_tables_html
 
-from config_utils import load_yaml_config, deep_get, choose, read_api_key
+from config_utils import DEFAULT_POLL_MINUTES, load_yaml_config, deep_get, choose, normalize_poll_minutes, read_api_key
 
 try:
     from zoneinfo import ZoneInfo
@@ -31,7 +31,8 @@ DEFAULT_TIMEOUT = 30
 DEFAULT_VIEW_HOST = "https://civitai.red"
 DEFAULT_API_MODE = "red"
 DEFAULT_NSFW_LEVEL = "X"
-DEFAULT_POLL_MINUTES = 15
+DASHBOARD_REFRESH_SECONDS = 300
+REQUEST_PAGE_DELAY_SECONDS = 0.5
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAT_KEYS = ["likeCount", "heartCount", "laughCount", "cryCount", "commentCount"]
 CIVITAI_IMAGE_CACHE_ROOT = "https://imagecache.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
@@ -336,7 +337,7 @@ def fetch_trpc_infinite(
             break
         seen_cursors.add(cursor_key)
         cursor = next_cursor
-        time.sleep(0.15)
+        time.sleep(REQUEST_PAGE_DELAY_SECONDS)
 
     return items
 
@@ -378,7 +379,7 @@ def rest_fetch_images(session: requests.Session, host: str, username: str, timeo
         metadata = data.get("metadata", {}) or {}
         next_url = metadata.get("nextPage")
         if next_url:
-            time.sleep(0.15)
+            time.sleep(REQUEST_PAGE_DELAY_SECONDS)
     return items
 
 
@@ -1581,7 +1582,8 @@ def render_dashboard(
     else:
         tracking_window = "All posts"
 
-    refresh_seconds = 60
+    refresh_seconds = DASHBOARD_REFRESH_SECONDS
+    refresh_label = f"{refresh_seconds // 60} min" if refresh_seconds % 60 == 0 else f"{refresh_seconds}s"
 
     def fmt_runtime_ts(key: str) -> str:
         value = runtime_status.get(key)
@@ -1722,17 +1724,16 @@ def render_dashboard(
             f"<tbody>{''.join(body)}</tbody></table>"
         )
 
-    def render_posting_recommendations(hour_rows: List[dict], weekday_rows: List[dict]) -> str:
+    def recommendation_basis_details(hour_rows: List[dict], weekday_rows: List[dict]) -> Tuple[str, str]:
         basis_values = {str(row.get("recommendation_basis") or "") for row in [*hour_rows, *weekday_rows] if row}
         if "first-day performance" in basis_values:
-            basis_title = "First-day data"
-            basis_detail = "Recommendations prefer captured 24h performance where available."
+            return "First-day data", "Recommendations prefer captured 24h performance where available."
         elif basis_values:
-            basis_title = "Lifetime totals"
-            basis_detail = "Early 2h/24h windows are not available yet, so this uses current totals."
-        else:
-            basis_title = "Not enough data"
-            basis_detail = "Keep collecting snapshots before treating timing advice seriously."
+            return "Lifetime totals", "Early 2h/24h windows are not available yet, so this uses current totals."
+        return "Not enough data", "Keep collecting snapshots before treating timing advice seriously."
+
+    def render_posting_recommendations(hour_rows: List[dict], weekday_rows: List[dict]) -> str:
+        basis_title, basis_detail = recommendation_basis_details(hour_rows, weekday_rows)
 
         parts_rec: List[str] = []
         parts_rec.append("<div class='section-title'>Posting recommendations</div>")
@@ -1749,6 +1750,61 @@ def render_dashboard(
         )
         parts_rec.append("</div>")
         return "".join(parts_rec)
+
+    def render_timing_board(hour_rows: List[dict], weekday_rows: List[dict]) -> str:
+        basis_title, basis_detail = recommendation_basis_details(hour_rows, weekday_rows)
+
+        def timing_candidate_card(row: dict, rank: int) -> str:
+            label = str(row.get("label") or "вЂ”")
+            metric = str(row.get("recommendation_metric") or "Score")
+            basis = str(row.get("recommendation_basis") or "available data")
+            return (
+                "<article class='timing-candidate-card' data-workspace-row>"
+                f"<div class='timing-rank'>#{rank}</div>"
+                "<div class='timing-candidate-body'>"
+                f"<div class='timing-label'>{html.escape(label)}</div>"
+                f"<div class='timing-score'>{fmt_num(row.get('recommendation_score'))}</div>"
+                f"<div class='timing-detail'>{html.escape(metric)} В· {int(row.get('posts') or 0)} posts</div>"
+                f"<div class='timing-detail'>Basis: {html.escape(basis)}</div>"
+                f"<div class='timing-confidence'>Confidence {chip(row.get('confidence') or 'low')}</div>"
+                "</div>"
+                "</article>"
+            )
+
+        def timing_panel(title: str, hint: str, rows: List[dict], empty_text: str) -> str:
+            if rows:
+                body = "".join(timing_candidate_card(row, idx) for idx, row in enumerate(rows[:3], start=1))
+            else:
+                body = f"<div class='timing-empty' data-workspace-row>{html.escape(empty_text)}</div>"
+            return (
+                "<div class='timing-card-panel'>"
+                "<div class='timing-panel-head'>"
+                f"<h4>{html.escape(title)}</h4>"
+                f"<span>{html.escape(hint)}</span>"
+                "</div>"
+                f"<div class='timing-card-list'>{body}</div>"
+                "</div>"
+            )
+
+        return (
+            "<section class='workspace-block timing-board-block'>"
+            "<h3>Timing board</h3>"
+            "<div class='hint'>A compact read on posting-time candidates before opening the full timing tables.</div>"
+            "<div class='timing-board-grid'>"
+            f"{timing_panel('Best hours', 'Ranked local publish hours', hour_rows, 'No reliable hour candidates yet.')}"
+            f"{timing_panel('Best weekdays', 'Ranked local publish days', weekday_rows, 'No reliable weekday candidates yet.')}"
+            "<div class='timing-card-panel timing-basis-panel' data-workspace-row>"
+            "<div class='timing-panel-head'>"
+            "<h4>Recommendation basis</h4>"
+            "<span>How this board is scored</span>"
+            "</div>"
+            f"<div class='timing-basis-title'>{html.escape(basis_title)}</div>"
+            f"<div class='timing-detail'>{html.escape(basis_detail)}</div>"
+            "<div class='timing-detail'>Content strength still matters more than timing alone.</div>"
+            "</div>"
+            "</div>"
+            "</section>"
+        )
 
     def short_text(value: Any, limit: int = 42) -> str:
         text = str(value or "Untitled post").strip() or "Untitled post"
@@ -1965,6 +2021,80 @@ def render_dashboard(
             f"<tbody>{''.join(body)}</tbody></table>"
         )
 
+    def render_history_board(
+        leader_rows: List[sqlite3.Row],
+        first24_pairs: List[Tuple[sqlite3.Row, int]],
+        first2_pairs: List[Tuple[sqlite3.Row, int]],
+    ) -> str:
+        def history_card(row: sqlite3.Row, rank: int, badge: str, metric: str, detail: str) -> str:
+            post_id = int(row["post_id"])
+            return (
+                f"<article class='history-post-card' data-workspace-row data-post-detail-id='{post_id}'>"
+                f"<div class='history-rank'>#{rank}</div>"
+                "<div class='history-card-body'>"
+                f"<div class='history-card-badge'>{html.escape(badge)}</div>"
+                f"<div class='history-card-title'>{post_link(view_host, post_id)}<span>{html.escape(short_text(row['title'], 58))}</span></div>"
+                f"<div class='history-card-metric'>{html.escape(metric)}</div>"
+                f"<div class='history-card-detail'>{html.escape(detail)}</div>"
+                "</div>"
+                "</article>"
+            )
+
+        def panel(title: str, hint: str, cards: List[str]) -> str:
+            body = "".join(cards) if cards else "<div class='history-mini-empty'>Not enough captured history yet.</div>"
+            return (
+                "<div class='history-card-panel'>"
+                "<div class='history-panel-head'>"
+                f"<h4>{html.escape(title)}</h4>"
+                f"<span>{html.escape(hint)}</span>"
+                "</div>"
+                f"<div class='history-card-list'>{body}</div>"
+                "</div>"
+            )
+
+        leader_cards = [
+            history_card(
+                row,
+                idx,
+                "All-time",
+                f"{fmt_int(safe_int(row['reaction_total']))} reactions",
+                f"published {tz_helper.fmt_dt(row['published_at'])}",
+            )
+            for idx, row in enumerate(leader_rows[:5], start=1)
+        ]
+        first24_cards = [
+            history_card(
+                row,
+                idx,
+                "First 24h",
+                f"{int(score)} reactions",
+                f"captured within first-day window - published {tz_helper.fmt_dt(row['published_at'])}",
+            )
+            for idx, (row, score) in enumerate(first24_pairs[:5], start=1)
+        ]
+        first2_cards = [
+            history_card(
+                row,
+                idx,
+                "First 2h",
+                f"{int(score)} reactions",
+                f"captured within first two hours - published {tz_helper.fmt_dt(row['published_at'])}",
+            )
+            for idx, (row, score) in enumerate(first2_pairs[:5], start=1)
+        ]
+
+        return (
+            "<section class='workspace-block history-board-block'>"
+            "<h3>History board</h3>"
+            "<div class='hint'>Compact leaders for comparing lifetime and early-window performance before opening the full tables.</div>"
+            "<div class='history-board-grid'>"
+            f"{panel('All-time leaders', 'Highest current reaction totals', leader_cards)}"
+            f"{panel('First-day leaders', 'Best captured 24h windows', first24_cards)}"
+            f"{panel('First-2h leaders', 'Fastest early reaction starts', first2_cards)}"
+            "</div>"
+            "</section>"
+        )
+
     def render_summary_table_content(rows: List[List[str]], headers: List[str]) -> str:
         body = []
         for row in rows:
@@ -2101,6 +2231,120 @@ def render_dashboard(
             "</aside>"
             "</div>"
             f"<div hidden>{templates}</div>"
+        )
+
+    def render_post_performance_board(rows: List[Dict[str, Any]]) -> str:
+        if not rows:
+            return ""
+
+        def row_period_flags(row: Dict[str, Any]) -> Dict[str, bool]:
+            return {
+                "day": bool(row.get("period_day")),
+                "week": bool(row.get("period_week")),
+                "month": bool(row.get("period_month")),
+                "year": bool(row.get("period_year")),
+                "all": True,
+            }
+
+        def performance_card(row: Dict[str, Any], badge: str, metric: str, detail: str) -> str:
+            post_id = int(row["post_id"])
+            flags = row_period_flags(row)
+            active_attr = " data-active-row='1'" if any(flags[key] for key in ("day", "week", "month", "year")) else ""
+            href = image_page_url(row.get("primary_image_id")) if row.get("primary_image_id") else None
+            preview = preview_html(
+                row.get("primary_thumbnail_url") or row.get("primary_image_url"),
+                str(row.get("title") or "Post preview"),
+                fallback_href=href,
+            )
+            return (
+                f"<article class='performance-post-card' data-workspace-row data-post-detail-id='{post_id}'{active_attr}{period_attrs(flags)}>"
+                f"{preview}"
+                "<div class='performance-card-body'>"
+                f"<div class='performance-card-badge'>{html.escape(badge)}</div>"
+                f"<div class='performance-card-title'>{post_link(view_host, post_id)}<span>{html.escape(short_text(row.get('title'), 58))}</span></div>"
+                f"<div class='performance-card-metric'>{metric}</div>"
+                f"<div class='performance-card-detail'>{html.escape(detail)}</div>"
+                "</div>"
+                "</article>"
+            )
+
+        def panel(title: str, hint: str, cards: List[str]) -> str:
+            body = "".join(cards) if cards else "<div class='performance-mini-empty'>No matching posts yet.</div>"
+            return (
+                "<div class='performance-card-panel'>"
+                "<div class='performance-panel-head'>"
+                f"<h4>{html.escape(title)}</h4>"
+                f"<span>{html.escape(hint)}</span>"
+                "</div>"
+                f"<div class='performance-card-list'>{body}</div>"
+                "</div>"
+            )
+
+        momentum_rows = sorted(
+            rows,
+            key=lambda item: (
+                int(item.get("reaction_week") or 0) + int(item.get("collections_week") or 0),
+                int(item.get("reaction_today") or 0) + int(item.get("collections_today") or 0),
+                int(item.get("reaction_total") if item.get("reaction_total") is not None else -1),
+                int(item.get("post_id") or 0),
+            ),
+            reverse=True,
+        )
+        collection_rows = sorted(
+            [row for row in rows if int(row.get("collections_week") or 0) > 0],
+            key=lambda item: (
+                int(item.get("collections_week") or 0),
+                int(item.get("collections_today") or 0),
+                int(item.get("reaction_week") or 0),
+                int(item.get("post_id") or 0),
+            ),
+            reverse=True,
+        )
+        fresh_rows = sorted(
+            [row for row in rows if row.get("period_week")],
+            key=lambda item: (float(item.get("published_sort") or 0), int(item.get("post_id") or 0)),
+            reverse=True,
+        )
+
+        momentum_cards = [
+            performance_card(
+                row,
+                "7-day movement",
+                f"{render_delta(int(row.get('reaction_week') or 0))} reactions",
+                f"collections {fmt_signed(int(row.get('collections_week') or 0))}",
+            )
+            for row in momentum_rows[:6]
+            if int(row.get("reaction_week") or 0) or int(row.get("collections_week") or 0) or row.get("period_week")
+        ]
+        collection_cards = [
+            performance_card(
+                row,
+                "Collections",
+                f"{int(row.get('collections_week') or 0)} adds",
+                f"today {int(row.get('collections_today') or 0)}",
+            )
+            for row in collection_rows[:6]
+        ]
+        fresh_cards = [
+            performance_card(
+                row,
+                "Fresh post",
+                html.escape(tz_helper.fmt_dt(row.get("published_at"))),
+                f"current reactions {fmt_int(row.get('reaction_total'))}",
+            )
+            for row in fresh_rows[:6]
+        ]
+
+        return (
+            "<section class='workspace-block performance-board-block'>"
+            "<h3>Performance board</h3>"
+            "<div class='hint'>Compact post cards for scanning movement before opening the full table.</div>"
+            "<div class='performance-board-grid'>"
+            f"{panel('Recent momentum', 'Reaction and collection movement', momentum_cards)}"
+            f"{panel('Collection movers', 'Posts gaining collection adds', collection_cards)}"
+            f"{panel('Fresh posts', 'Recently published or active rows', fresh_cards)}"
+            "</div>"
+            "</section>"
         )
 
     def render_post_performance_table(rows: List[Dict[str, Any]]) -> str:
@@ -2289,11 +2533,14 @@ def render_dashboard(
     .chip{display:inline-flex;align-items:center;padding:4px 10px;border-radius:999px;font-size:12px;font-weight:700;background:#1e2742;color:#d8e5ff;border:1px solid transparent}.chip.good{background:rgba(46,160,67,.15);color:#7ee787;border-color:rgba(46,160,67,.35)}.chip.mid{background:rgba(56,139,253,.16);color:#9cc3ff;border-color:rgba(56,139,253,.35)}.chip.warn{background:rgba(210,153,34,.16);color:#f2cc60;border-color:rgba(210,153,34,.35)}.chip.na{background:rgba(91,101,127,.18);color:#c8d1e8;border-color:rgba(91,101,127,.35)}
     .panel{padding:18px}.panel h2{margin:0 0 8px;font-size:18px}.panel .hint{margin:0 0 12px;color:var(--muted);font-size:13px;line-height:1.45}.clean-table{width:100%;border-collapse:collapse}.clean-table th,.clean-table td{padding:12px 10px;border-bottom:1px solid var(--border);text-align:center;vertical-align:top}.clean-table th{font-size:12px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);cursor:pointer;user-select:none}.clean-table th.sort-asc,.clean-table th.sort-desc{color:var(--accent)}.clean-table td.num,.clean-table th.num{text-align:center}.table-panel{overflow:auto}
     [hidden]{display:none!important}.artwork-cell{display:flex;align-items:center;gap:12px;min-width:230px;text-align:left}.preview-link{display:inline-flex;align-items:center;justify-content:center;text-decoration:none;vertical-align:top}.clean-table .preview-link{width:56px;height:56px}.post-thumb{width:56px;height:56px;border-radius:8px;object-fit:cover;background:#0d1528;border:1px solid var(--border);flex:0 0 56px}.thumb-missing{display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:10px;line-height:1.15;text-align:center;padding:6px}.thumb-missing[hidden]{display:none!important}.clean-table tr[data-post-detail-id]{cursor:pointer}.clean-table tr[data-post-detail-id]:hover td{background:rgba(127,179,255,.06)}
+    .performance-board-block{overflow:visible}.performance-board-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}.performance-card-panel{border:1px solid var(--border);background:#0d1528;border-radius:14px;padding:14px;min-width:0}.performance-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.performance-panel-head h4{margin:0;font-size:16px}.performance-panel-head span{color:var(--muted);font-size:12px;text-align:right}.performance-card-list{display:flex;flex-direction:column;gap:10px}.performance-post-card{display:grid;grid-template-columns:68px minmax(0,1fr);gap:12px;align-items:center;border:1px solid #263353;background:#10182b;border-radius:12px;padding:10px;cursor:pointer;min-width:0}.performance-post-card:hover{border-color:#45629c;background:#121c33}.performance-post-card .preview-link,.performance-post-card .post-thumb{width:64px;height:64px;flex-basis:64px}.performance-card-body{min-width:0}.performance-card-badge{display:inline-flex;border:1px solid var(--border);border-radius:999px;padding:4px 8px;background:#0d1528;color:var(--muted);font-size:11px;font-weight:800;margin-bottom:7px}.performance-card-title{font-size:13px;line-height:1.35}.performance-card-title a{font-weight:800}.performance-card-title span{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.performance-card-metric{font-size:18px;font-weight:800;margin-top:8px}.performance-card-detail{color:var(--muted);font-size:12px;margin-top:3px}.performance-mini-empty{border:1px dashed var(--border);border-radius:12px;padding:12px;color:var(--muted);font-size:13px}
+    .timing-board-block{overflow:visible}.timing-board-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}.timing-card-panel{border:1px solid var(--border);background:#0d1528;border-radius:14px;padding:14px;min-width:0}.timing-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.timing-panel-head h4{margin:0;font-size:16px}.timing-panel-head span{color:var(--muted);font-size:12px;text-align:right}.timing-card-list{display:flex;flex-direction:column;gap:10px}.timing-candidate-card{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;border:1px solid #263353;background:#10182b;border-radius:12px;padding:10px;min-width:0}.timing-rank{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:999px;background:#17233f;border:1px solid var(--border);font-weight:800;color:var(--accent);font-size:13px}.timing-candidate-body{min-width:0}.timing-label{font-size:17px;font-weight:800;line-height:1.25}.timing-score{font-size:24px;font-weight:800;margin-top:6px;font-variant-numeric:tabular-nums}.timing-detail{color:var(--muted);font-size:12px;line-height:1.45;margin-top:3px}.timing-confidence{display:flex;align-items:center;gap:7px;flex-wrap:wrap;color:var(--muted);font-size:12px;margin-top:8px}.timing-empty{border:1px dashed var(--border);border-radius:12px;padding:12px;color:var(--muted);font-size:13px}.timing-basis-title{font-size:24px;font-weight:800;margin:14px 0 10px}
+    .history-board-block{overflow:visible}.history-board-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:14px}.history-card-panel{border:1px solid var(--border);background:#0d1528;border-radius:14px;padding:14px;min-width:0}.history-panel-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start;margin-bottom:12px}.history-panel-head h4{margin:0;font-size:16px}.history-panel-head span{color:var(--muted);font-size:12px;text-align:right}.history-card-list{display:flex;flex-direction:column;gap:10px}.history-post-card{display:grid;grid-template-columns:44px minmax(0,1fr);gap:10px;border:1px solid #263353;background:#10182b;border-radius:12px;padding:10px;cursor:pointer;min-width:0}.history-post-card:hover{border-color:#45629c;background:#121c33}.history-rank{display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:999px;background:#17233f;border:1px solid var(--border);font-weight:800;color:var(--accent);font-size:13px}.history-card-body{min-width:0}.history-card-badge{display:inline-flex;border:1px solid var(--border);border-radius:999px;padding:4px 8px;background:#0d1528;color:var(--muted);font-size:11px;font-weight:800;margin-bottom:7px}.history-card-title{font-size:13px;line-height:1.35}.history-card-title a{font-weight:800}.history-card-title span{display:block;color:var(--muted);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:2px}.history-card-metric{font-size:18px;font-weight:800;margin-top:8px}.history-card-detail{color:var(--muted);font-size:12px;margin-top:3px}.history-mini-empty{border:1px dashed var(--border);border-radius:12px;padding:12px;color:var(--muted);font-size:13px}
     .workspace-panel{background:linear-gradient(180deg,var(--panel) 0%,#12192c 100%);border:1px solid var(--border);border-radius:16px;box-shadow:var(--shadow);overflow:hidden}.workspace-head{position:sticky;top:0;z-index:3;background:rgba(18,26,47,.96);backdrop-filter:blur(8px);border-bottom:1px solid var(--border);padding:14px 16px}.workspace-tabs{display:flex;gap:8px;flex-wrap:wrap}.workspace-tab{border:1px solid var(--border);background:#10182b;color:var(--muted);padding:9px 12px;border-radius:8px;cursor:pointer;font-weight:700}.workspace-tab:hover,.workspace-tab.is-active{color:var(--text);border-color:#45629c;background:#17233f}.workspace-tools{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px}.workspace-search{min-width:260px;max-width:420px;flex:1;border:1px solid var(--border);background:#0d1528;color:var(--text);padding:10px 12px;border-radius:8px}.workspace-search::placeholder{color:var(--muted)}.workspace-check{display:inline-flex;gap:7px;align-items:center;color:var(--muted);font-size:13px}.workspace-check input{accent-color:var(--accent)}.workspace-periods{display:inline-flex;gap:4px;align-items:center;flex-wrap:wrap}.workspace-period-label{color:var(--muted);font-size:12px;margin-right:2px}.workspace-period{border:1px solid var(--border);background:#0d1528;color:var(--muted);padding:7px 9px;border-radius:8px;cursor:pointer;font-size:12px;font-weight:800}.workspace-period:hover,.workspace-period.is-active{color:var(--text);border-color:#45629c;background:#17233f}.workspace-section{padding:0 16px 16px}.workspace-section[hidden]{display:none}.workspace-block{padding:18px 0;border-bottom:1px solid var(--border);overflow:auto}.workspace-block:last-child{border-bottom:0}.workspace-block h3{margin:0 0 8px;font-size:18px}.workspace-empty{display:none;margin:12px 0;color:var(--muted);font-size:13px}.workspace-section.is-filter-empty .workspace-empty{display:block}
     .post-drawer-backdrop{position:fixed;inset:0;z-index:20;background:rgba(3,7,18,.62);display:flex;justify-content:flex-end}.post-drawer-backdrop[hidden]{display:none}.post-drawer{width:min(560px,100vw);height:100%;overflow:auto;background:#10182b;border-left:1px solid var(--border);box-shadow:-18px 0 40px rgba(0,0,0,.35);padding:22px;position:relative}.drawer-close{position:absolute;top:14px;right:14px;width:36px;height:36px;border:1px solid var(--border);border-radius:8px;background:#17233f;color:var(--text);font-size:22px;line-height:1;cursor:pointer}.drawer-content h2{margin:0 44px 8px 0;font-size:22px}.drawer-hero{display:grid;grid-template-columns:168px 1fr;gap:16px;align-items:start;margin-bottom:18px}.drawer-preview{width:168px;height:168px;border-radius:8px;object-fit:cover;background:#0d1528;border:1px solid var(--border)}.drawer-muted{color:var(--muted);font-size:13px;line-height:1.45}.drawer-links{margin:8px 0;color:var(--muted)}.drawer-stats{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}.drawer-stat{border:1px solid var(--border);background:#0d1528;border-radius:8px;padding:12px}.drawer-stat-label{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:7px}.drawer-stat-value{font-size:22px;font-weight:800}.drawer-stat-detail{margin-top:4px;color:var(--muted);font-size:12px}.drawer-section{border-top:1px solid var(--border);padding-top:16px;margin-top:16px}.drawer-section h3{margin:0 0 10px;font-size:16px}.drawer-image-links{display:flex;gap:8px;flex-wrap:wrap}.drawer-image-links a,.drawer-image-links span{border:1px solid var(--border);border-radius:999px;padding:6px 10px;background:#0d1528}
     a{color:var(--accent);text-decoration:none} a:hover{text-decoration:underline}.row-sub{margin-top:5px;color:var(--muted);font-size:12px;line-height:1.35}.delta-pos{color:#7ee787;font-weight:800}.delta-neg{color:#ff9b9b;font-weight:800}.small-note{margin-top:14px;color:var(--muted);font-size:12px}
-    @media (max-width:1300px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
-    @media (max-width:900px){.feature-grid,.reaction-row,.visual-grid{grid-template-columns:1fr}.visual-wide{grid-row:auto}.top-chart-row{grid-template-columns:1fr}.top-chart-value{text-align:left}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}.workspace-search{min-width:100%}.workspace-tab{flex:1 1 auto}.drawer-hero{grid-template-columns:1fr}.drawer-preview{width:100%;height:auto;aspect-ratio:1/1}.drawer-stats{grid-template-columns:1fr}}
+    @media (max-width:1300px){.feature-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.performance-board-grid,.timing-board-grid,.history-board-grid{grid-template-columns:1fr 1fr}}
+    @media (max-width:900px){.feature-grid,.reaction-row,.visual-grid,.performance-board-grid,.timing-board-grid,.history-board-grid{grid-template-columns:1fr}.visual-wide{grid-row:auto}.top-chart-row{grid-template-columns:1fr}.top-chart-value{text-align:left}.hero{flex-direction:column}.metrics{grid-template-columns:1fr}.workspace-search{min-width:100%}.workspace-tab{flex:1 1 auto}.performance-panel-head,.timing-panel-head,.history-panel-head{flex-direction:column}.performance-panel-head span,.timing-panel-head span,.history-panel-head span{text-align:left}.drawer-hero{grid-template-columns:1fr}.drawer-preview{width:100%;height:auto;aspect-ratio:1/1}.drawer-stats{grid-template-columns:1fr}}
     """
 
     generated_at = utc_now_iso()
@@ -2348,7 +2595,7 @@ def render_dashboard(
         "var hideUnmatched=workspace.querySelector('[data-workspace-hide-unmatched]');"
         "var period=workspace.dataset.workspacePeriod||'all';"
         "var query=((search&&search.value)||'').trim().toLowerCase();"
-        "var rows=Array.from(section.querySelectorAll('tbody tr'));"
+        "var rows=Array.from(section.querySelectorAll('tbody tr,[data-workspace-row]'));"
         "var hasActiveRows=rows.some(function(row){return row.dataset.activeRow==='1';});"
         "var hasPeriodRows=rows.some(function(row){return row.dataset.periodAll==='1'||!!row.querySelector('[data-period-all=\"1\"]');});"
         "function periodMatches(row,value){if(value==='all')return true;var key='period'+value.charAt(0).toUpperCase()+value.slice(1);return row.dataset[key]==='1'||!!row.querySelector('[data-period-'+value+'=\"1\"]');}"
@@ -2394,9 +2641,10 @@ def render_dashboard(
         "var drawer=document.querySelector('[data-post-drawer]');"
         "var drawerContent=document.querySelector('[data-post-drawer-content]');"
         "function closeDrawer(){if(drawer){drawer.hidden=true;document.body.style.overflow='';}}"
-        "function openDrawer(id){"
+        "function openDrawer(id,type){"
         "if(!drawer||!drawerContent)return;"
-        "var tpl=document.querySelector('[data-post-detail-template=\"'+id+'\"]');"
+        "var selector=type==='collection'?'[data-collection-detail-template=\"'+id+'\"]':'[data-post-detail-template=\"'+id+'\"]';"
+        "var tpl=document.querySelector(selector);"
         "if(!tpl)return;"
         "drawerContent.innerHTML=tpl.innerHTML;"
         "drawer.hidden=false;document.body.style.overflow='hidden';"
@@ -2404,8 +2652,13 @@ def render_dashboard(
         "var close=drawer.querySelector('[data-post-drawer-close]'); if(close) close.focus();"
         "}"
         "document.querySelectorAll('[data-post-detail-id]').forEach(function(row){"
-        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.postDetailId);});"
-        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.postDetailId);}});"
+        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.postDetailId,'post');});"
+        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.postDetailId,'post');}});"
+        "row.tabIndex=0;"
+        "});"
+        "document.querySelectorAll('[data-collection-detail-id]').forEach(function(row){"
+        "row.addEventListener('click',function(event){if(event.target.closest('a,button,input,label'))return;openDrawer(row.dataset.collectionDetailId,'collection');});"
+        "row.addEventListener('keydown',function(event){if(event.key==='Enter'||event.key===' '){event.preventDefault();openDrawer(row.dataset.collectionDetailId,'collection');}});"
         "row.tabIndex=0;"
         "});"
         "document.querySelectorAll('[data-post-drawer-close]').forEach(function(button){button.addEventListener('click',closeDrawer);});"
@@ -2417,7 +2670,7 @@ def render_dashboard(
     parts.append(
         "<div class='hero'>"
         f"<div><h1>{html.escape(APP_TITLE)}</h1><p class='sub'>tRPC post-based analytics for <strong>{html.escape(dashboard_name)}</strong> · generated {html.escape(tz_helper.fmt_dt(generated_at))}</p></div>"
-        f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_seconds}s</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
+        f"<div class='toolbar'><span class='live'>Auto-refresh every {refresh_label}</span><button onclick='refreshNow()'>Refresh now</button><span class='live'>{'Runtime status connected' if runtime_connected else 'No live runner status yet'}</span></div>"
         "</div>"
     )
 
@@ -2475,10 +2728,15 @@ def render_dashboard(
         {
             "id": "performance",
             "title": "Performance",
-            "html": render_workspace_block(
-                "Post performance",
-                "Per-post monitoring view sorted by recent reaction and collection activity.",
-                render_post_performance_table(post_performance_rows),
+            "html": "".join(
+                [
+                    render_post_performance_board(post_performance_rows),
+                    render_workspace_block(
+                        "Full performance table",
+                        "Per-post monitoring view sorted by recent reaction and collection activity.",
+                        render_post_performance_table(post_performance_rows),
+                    ),
+                ]
             ),
         }
     ]
@@ -2497,6 +2755,7 @@ def render_dashboard(
                 "title": "Timing",
                 "html": "".join(
                     [
+                        render_timing_board(suggested_windows, suggested_weekdays),
                         render_workspace_block(
                             "Suggested posting windows",
                             "Ranked timing candidates from posts already tracked in this database.",
@@ -2531,6 +2790,7 @@ def render_dashboard(
                 "title": "History",
                 "html": "".join(
                     [
+                        render_history_board(by_total_reactions, first24_rows, first2_rows),
                         render_workspace_block("Leaders by total reactions", "", render_leaders_table(by_total_reactions)),
                         render_workspace_block(
                             "Best first 24h",
@@ -2690,7 +2950,7 @@ def resolve_runtime_config(args: argparse.Namespace) -> Dict[str, Any]:
     cfg_start_mode = deep_get(cfg, "tracking.start_mode", "post_id")
     cfg_min_post_id = deep_get(cfg, "tracking.start_post_id")
     cfg_start_date = deep_get(cfg, "tracking.start_date")
-    poll_minutes = deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)
+    poll_minutes = normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
 
     if args.start_date is not None:
         start_mode = "date"
@@ -2842,7 +3102,7 @@ def _resolve_runtime_from_config_dict(config: Dict[str, Any], config_path: str =
     start_mode = deep_get(cfg, "tracking.start_mode", "post_id")
     min_post_id = deep_get(cfg, "tracking.start_post_id") if start_mode != "date" else None
     start_date = deep_get(cfg, "tracking.start_date") if start_mode == "date" else None
-    poll_minutes = deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)
+    poll_minutes = normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
 
     allow_rest_fallback = bool(deep_get(cfg, "options.allow_rest_fallback", False))
     inline_api_key = deep_get(cfg, "auth.api_key")

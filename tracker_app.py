@@ -90,6 +90,8 @@ except Exception:  # pragma: no cover
 
 from app_info import APP_NAME, APP_TITLE, APP_VERSION, GITHUB_RELEASES_PAGE
 from config_utils import (
+    DEFAULT_POLL_MINUTES,
+    MIN_POLL_MINUTES,
     TIMEZONE_EXAMPLES,
     autostart_enabled,
     default_config,
@@ -102,6 +104,7 @@ from config_utils import (
     is_valid_timezone_name,
     load_json_config,
     materialize_api_key,
+    normalize_poll_minutes,
     run_startup_self_check,
     save_json_config,
     set_windows_autostart,
@@ -798,7 +801,7 @@ class SettingsDialog(DialogWindow):
                 self.start_year_var.set(y)
             except Exception:
                 pass
-        self.poll_minutes_var = tk.StringVar(value=str(deep_get(config, "tracking.poll_minutes", 15)))
+        self.poll_minutes_var = tk.StringVar(value=str(normalize_poll_minutes(deep_get(config, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))))
 
         self.api_mode_var = tk.StringVar(value=deep_get(config, "api.mode", "red"))
         self.view_host_var = tk.StringVar(value=deep_get(config, "api.view_host", "https://civitai.red"))
@@ -1001,7 +1004,7 @@ class SettingsDialog(DialogWindow):
             "Poll interval",
             self.poll_minutes_var,
             width=8,
-            help_text="How often the app checks CivitAI while auto polling is enabled.",
+            help_text=f"How often the app checks CivitAI while auto polling is enabled. Minimum: {MIN_POLL_MINUTES} minutes.",
         )
 
     def _build_api_tab(self):
@@ -1127,9 +1130,9 @@ class SettingsDialog(DialogWindow):
             cfg["tracking"]["start_date"] = parsed.strftime("%Y-%m-%d")
 
         try:
-            cfg["tracking"]["poll_minutes"] = int(self.poll_minutes_var.get().strip())
+            cfg["tracking"]["poll_minutes"] = normalize_poll_minutes(self.poll_minutes_var.get().strip())
         except Exception:
-            cfg["tracking"]["poll_minutes"] = 15
+            cfg["tracking"]["poll_minutes"] = DEFAULT_POLL_MINUTES
 
         cfg["api"]["mode"] = self.api_mode_var.get().strip() or "red"
         cfg["api"]["view_host"] = self.view_host_var.get().strip() or "https://civitai.red"
@@ -2063,11 +2066,7 @@ class TrackerApp(AppRoot):
 
     def _read_interval_text(self) -> str:
         cfg = load_json_config(self.config_path) if self.config_path.exists() else default_config()
-        minutes = deep_get(cfg, "tracking.poll_minutes", 15)
-        try:
-            minutes = int(minutes)
-        except Exception:
-            minutes = 15
+        minutes = normalize_poll_minutes(deep_get(cfg, "tracking.poll_minutes", DEFAULT_POLL_MINUTES))
         return f"{minutes} minute{'s' if minutes != 1 else ''}"
 
     def _refresh_status(self):
