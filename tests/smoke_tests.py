@@ -427,6 +427,143 @@ class CollectionParserSmokeTests(unittest.TestCase):
         date_marker_only = {"result": {"data": {"json": {"transactions": []}, "meta": {"values": {"cursor": ["Date"]}}}}}
         self.assertIsNone(buzz_ingest.extract_next_cursor(date_marker_only, []))
 
+    def test_collection_events_do_not_store_personal_actor_fields(self) -> None:
+        tx = {
+            "date": "2026-05-08T12:00:00Z",
+            "amount": 1,
+            "description": "Collected content",
+            "details": {
+                "type": "collectedContent:image",
+                "byUserId": 12345,
+                "entityId": 98765,
+                "entityType": "Image",
+            },
+            "toUser": {
+                "id": 777,
+                "username": "creator-name",
+            },
+        }
+
+        event = buzz_ingest.core_event_from_transaction(tx, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+
+        self.assertIsNotNone(event)
+        self.assertIsNone(event["by_user_id"])
+        self.assertIsNone(event["to_user_id"])
+        self.assertIsNone(event["to_username"])
+        self.assertIsNone(event["description"])
+        self.assertNotIn("byUserId", event["raw_json"])
+        self.assertNotIn("toUser", event["raw_json"])
+        self.assertNotIn("description", event["raw_json"])
+        self.assertNotIn("creator-name", event["raw_json"])
+        self.assertNotIn('"id":777', event["raw_json"])
+        stored_payload = json.loads(event["raw_json"])
+        self.assertEqual(stored_payload["details"]["entityId"], 98765)
+        self.assertEqual(stored_payload["details"]["type"], "collectedContent:image")
+
+    def test_collection_event_key_uses_target_not_actor_identity(self) -> None:
+        base_tx = {
+            "date": "2026-05-08T12:00:00Z",
+            "amount": 1,
+            "details": {
+                "type": "collectedContent:image",
+                "byUserId": 12345,
+                "entityId": 98765,
+                "entityType": "Image",
+            },
+            "toUser": {
+                "id": 777,
+                "username": "creator-name",
+            },
+        }
+        same_target_other_actor = json.loads(json.dumps(base_tx))
+        same_target_other_actor["details"]["byUserId"] = 54321
+        same_target_other_actor["toUser"] = {"id": 888, "username": "other-name"}
+        other_target = json.loads(json.dumps(base_tx))
+        other_target["details"]["entityId"] = 98766
+
+        first = buzz_ingest.core_event_from_transaction(base_tx, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+        second = buzz_ingest.core_event_from_transaction(same_target_other_actor, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+        third = buzz_ingest.core_event_from_transaction(other_target, "https://civitai.red", "blue", "2026-05-08T12:01:00Z")
+
+        self.assertEqual(first["event_key"], second["event_key"])
+        self.assertNotEqual(first["event_key"], third["event_key"])
+
+    def test_collection_schema_cleanup_redacts_existing_personal_fields(self) -> None:
+        db_path = smoke_path("collection_privacy_cleanup", ".db")
+        try:
+            buzz_ingest.init_content_engagement_schema(str(db_path))
+            conn = sqlite3.connect(db_path)
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO content_engagement_events (
+                        event_key, captured_at, event_time, host, account_type,
+                        raw_type, normalized_type, amount, description,
+                        by_user_id, target_id, target_entity_id, target_entity_type,
+                        target_type_candidate, to_user_id, to_username,
+                        related_image_id, related_post_id, raw_json
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        "legacy-key",
+                        "2026-05-08T12:01:00Z",
+                        "2026-05-08T12:00:00Z",
+                        "https://civitai.red",
+                        "blue",
+                        "collectedContent:image",
+                        "collection_like",
+                        1,
+                        "Collected content",
+                        12345,
+                        98765,
+                        98765,
+                        "Image",
+                        "image",
+                        777,
+                        "creator-name",
+                        98765,
+                        None,
+                        '{"details":{"type":"collectedContent:image","byUserId":12345,"entityId":98765},"toUser":{"id":777,"username":"creator-name"}}',
+                    ),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+            buzz_ingest.init_content_engagement_schema(str(db_path))
+            conn = sqlite3.connect(db_path)
+            try:
+                row = conn.execute(
+                    """
+                    SELECT by_user_id, to_user_id, to_username, description, target_id, related_image_id, raw_json
+                    FROM content_engagement_events
+                    WHERE event_key = 'legacy-key'
+                    """
+                ).fetchone()
+            finally:
+                conn.close()
+
+            self.assertIsNotNone(row)
+            self.assertIsNone(row[0])
+            self.assertIsNone(row[1])
+            self.assertIsNone(row[2])
+            self.assertIsNone(row[3])
+            self.assertEqual(row[4], 98765)
+            self.assertEqual(row[5], 98765)
+            self.assertNotIn("byUserId", row[6])
+            self.assertNotIn("toUser", row[6])
+            self.assertNotIn("description", row[6])
+            self.assertNotIn("creator-name", row[6])
+            self.assertNotIn('"id":777', row[6])
+            stored_payload = json.loads(row[6])
+            self.assertEqual(stored_payload["details"]["entityId"], 98765)
+            self.assertEqual(stored_payload["details"]["type"], "collectedContent:image")
+        finally:
+            try:
+                db_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+
 
 class CollectionConfigSmokeTests(unittest.TestCase):
     def test_legacy_collection_config_is_normalized(self) -> None:

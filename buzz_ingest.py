@@ -102,6 +102,7 @@ def init_content_engagement_schema(db_path: str) -> None:
             ON content_engagement_events(normalized_type)
             """
         )
+        cleanup_content_engagement_personal_fields(conn)
         conn.commit()
     finally:
         conn.close()
@@ -342,9 +343,82 @@ def target_type_candidate(details: Dict[str, Any], raw_type: Optional[str]) -> s
     return "unknown"
 
 
-def build_event_key(event_time: str, raw_type: str, amount: Optional[int], target_id: Optional[int], by_user_id: Optional[int], to_user_id: Optional[int]) -> str:
-    payload = f"{event_time}|{raw_type}|{amount}|{target_id}|{by_user_id}|{to_user_id}"
+def build_event_key(
+    event_time: str,
+    raw_type: str,
+    amount: Optional[int],
+    target_id: Optional[int],
+    target_entity_id: Optional[int] = None,
+    target_entity_type: Optional[str] = None,
+    target_type_candidate: Optional[str] = None,
+) -> str:
+    payload = "|".join(
+        [
+            event_time,
+            raw_type,
+            str(amount),
+            str(target_id),
+            str(target_entity_id),
+            str(target_entity_type or ""),
+            str(target_type_candidate or ""),
+        ]
+    )
     return hashlib.sha1(payload.encode("utf-8")).hexdigest()
+
+
+def sanitize_transaction_payload(tx: Dict[str, Any]) -> Dict[str, Any]:
+    sanitized: Dict[str, Any] = {}
+    for key in ("date", "amount"):
+        if key in tx:
+            sanitized[key] = tx.get(key)
+
+    details = tx.get("details")
+    if isinstance(details, dict):
+        safe_details = {}
+        for key in ("type", "entityId", "entityType", "forId"):
+            if key in details:
+                safe_details[key] = details.get(key)
+        if safe_details:
+            sanitized["details"] = safe_details
+    return sanitized
+
+
+def cleanup_content_engagement_personal_fields(conn: sqlite3.Connection) -> int:
+    rows = conn.execute(
+        """
+        SELECT id, raw_json
+        FROM content_engagement_events
+        WHERE by_user_id IS NOT NULL
+           OR to_user_id IS NOT NULL
+           OR to_username IS NOT NULL
+           OR description IS NOT NULL
+           OR raw_json LIKE '%byUserId%'
+           OR raw_json LIKE '%"toUser"%'
+        """
+    ).fetchall()
+
+    changed = 0
+    for row_id, raw_json in rows:
+        sanitized_json = raw_json
+        try:
+            payload = json.loads(raw_json)
+            sanitized_json = json.dumps(sanitize_transaction_payload(payload), ensure_ascii=False, separators=(",", ":"))
+        except Exception:
+            pass
+        cur = conn.execute(
+            """
+            UPDATE content_engagement_events
+            SET by_user_id = NULL,
+                to_user_id = NULL,
+                to_username = NULL,
+                description = NULL,
+                raw_json = ?
+            WHERE id = ?
+            """,
+            (sanitized_json, row_id),
+        )
+        changed += cur.rowcount
+    return changed
 
 
 def core_event_from_transaction(tx: Dict[str, Any], host: str, account_type: str, captured_at: str) -> Optional[Dict[str, Any]]:
@@ -358,25 +432,19 @@ def core_event_from_transaction(tx: Dict[str, Any], host: str, account_type: str
 
     event_time = str(tx.get("date") or "").strip()
     amount = tx.get("amount")
-    description = tx.get("description")
-    by_user_id = details.get("byUserId")
     target_entity_id = details.get("entityId")
     target_id = target_entity_id if target_entity_id is not None else details.get("forId")
     target_entity_type = details.get("entityType")
     target_type = target_type_candidate(details, raw_type)
-    to_user = tx.get("toUser") or {}
-    if not isinstance(to_user, dict):
-        to_user = {}
-    to_user_id = to_user.get("id")
-    to_username = to_user.get("username")
 
     event_key = build_event_key(
         event_time=event_time,
         raw_type=str(raw_type),
         amount=int(amount) if isinstance(amount, int) else None,
         target_id=int(target_id) if isinstance(target_id, int) else None,
-        by_user_id=int(by_user_id) if isinstance(by_user_id, int) else None,
-        to_user_id=int(to_user_id) if isinstance(to_user_id, int) else None,
+        target_entity_id=int(target_entity_id) if isinstance(target_entity_id, int) else None,
+        target_entity_type=str(target_entity_type or ""),
+        target_type_candidate=target_type,
     )
 
     return {
@@ -388,17 +456,17 @@ def core_event_from_transaction(tx: Dict[str, Any], host: str, account_type: str
         "raw_type": raw_type,
         "normalized_type": normalized,
         "amount": amount,
-        "description": description,
-        "by_user_id": by_user_id,
+        "description": None,
+        "by_user_id": None,
         "target_id": target_id,
         "target_entity_id": target_entity_id,
         "target_entity_type": target_entity_type,
         "target_type_candidate": target_type,
-        "to_user_id": to_user_id,
-        "to_username": to_username,
+        "to_user_id": None,
+        "to_username": None,
         "related_image_id": None,
         "related_post_id": None,
-        "raw_json": json.dumps(tx, ensure_ascii=False, separators=(",", ":")),
+        "raw_json": json.dumps(sanitize_transaction_payload(tx), ensure_ascii=False, separators=(",", ":")),
     }
 
 
