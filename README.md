@@ -4,6 +4,23 @@ A local Windows-first desktop app for tracking CivitAI post performance, collect
 
 The app keeps its runtime data on your machine. It can run from source or as a portable PyInstaller EXE build.
 
+## Unofficial Tool And Platform Terms
+
+CivitAI Tracker is an unofficial community tool. It is not affiliated with, endorsed by, or supported by CivitAI.
+
+The app is intended for local personal analytics for a user's own CivitAI account and content. Users are responsible for complying with CivitAI's terms, platform rules, and applicable law.
+
+Do not use this project to:
+
+- bypass authentication, age gates, access controls, or content restrictions;
+- scrape unrelated users or platform data at scale;
+- manipulate CivitAI statistics, engagement, Buzz, rankings, or visibility;
+- automate likes, comments, collections, follows, or other engagement actions;
+- collect personal data without consent;
+- package the project as a hosted paid analytics service or commercial redistribution that implies project or platform endorsement.
+
+The source code is licensed under the MIT License. That license grants broad rights to use, copy, modify, and distribute the code. The statements above are project policy and usage guidance; they do not grant permission to violate CivitAI terms or imply that commercial services built from this project are endorsed or supported by the maintainers.
+
 ## What It Does
 
 - Tracks CivitAI posts from a configured start point.

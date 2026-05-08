@@ -74,10 +74,21 @@ git diff --check
 
 ## Project Boundaries
 
-The app is a local analytics tool. Avoid changes that:
+The app is a local personal analytics tool for a user's own CivitAI account and content.
+
+Maintainers will not accept issues or pull requests that add, encourage, or normalize behavior that violates platform rules or turns the project into an abusive automation tool.
+
+Avoid changes that:
 
 - bypass authentication or platform access controls;
-- encourage abusive scraping or high-volume automated requests;
+- bypass age gates, restricted-content visibility, or account-level permissions;
+- encourage abusive scraping, high-volume account discovery, or bulk harvesting of unrelated users' data;
+- automate likes, comments, collections, follows, Buzz activity, rankings, or other engagement manipulation;
+- collect personal data without consent;
+- remove reasonable polling limits, timeouts, or user-controlled tracking scope;
 - weaken API key handling;
+- turn the project into a hosted multi-tenant service, paid analytics product, or commercial redistribution path;
+- imply affiliation with or endorsement by CivitAI;
 - apply update packages without validating their portable app layout.
 
+The repository uses the MIT License, so this section is not a substitute for legal license terms. It is the maintainer policy for what this project will accept, support, and distribute.
