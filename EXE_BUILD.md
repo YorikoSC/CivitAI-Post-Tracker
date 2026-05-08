@@ -15,7 +15,7 @@ The script:
 - creates `.venv` if needed;
 - installs `requirements.txt` into `.venv`;
 - installs or updates PyInstaller in `.venv`;
-- verifies runtime imports such as `requests`;
+- verifies runtime imports such as `requests` and `customtkinter`;
 - runs PyInstaller from the same `.venv`.
 
 Output:
@@ -61,9 +61,9 @@ After building:
 4. Save **Settings** if testing from a fresh folder.
 5. Run **Run now**.
 6. Open the dashboard and confirm the `generated ...` timestamp changed.
-7. Confirm previews, Performance filters, and Collections filters still render correctly.
+7. Confirm dashboard previews, workspace tabs, filters, and detail drawers render correctly.
 8. Confirm the main window Activity area and status footer are visible at the default size.
-9. Confirm Settings, Updates, and Diagnostics open with readable text and styled scrollbars.
+9. Confirm Settings, Updates, and Diagnostics open with readable text.
 10. Check `logs\core_last.log` for fatal errors.
 
 When testing collection tracking, use a configured API key and confirm `collection_ingest.ok` is true or that any reported reason is expected.

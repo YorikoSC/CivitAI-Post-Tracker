@@ -6,10 +6,10 @@ Security fixes are handled for the latest public release and the current `main` 
 
 | Version | Supported |
 | --- | --- |
-| 10.3.x | Yes |
+| 10.4.x | Yes |
 | Older releases | No |
 
-This table should be updated when a new public release becomes the maintained version.
+This table tracks the maintained public release line.
 
 ## Reporting A Vulnerability
 

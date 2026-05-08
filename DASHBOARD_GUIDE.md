@@ -72,6 +72,8 @@ Older local image rows may not have preview URLs yet. If an image ID is known, t
 
 Collection tracking uses authenticated transaction data and maps image-level collection events back to tracked posts when the image is known locally.
 
+Collection event storage and dashboard details use image/post identifiers and collection counts. They do not expose who added an image to a collection.
+
 The Collections views show:
 
 - collection additions;

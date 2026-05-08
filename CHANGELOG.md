@@ -9,9 +9,17 @@
 - Dashboard smoke coverage for the Performance, Timing, and History boards plus card-to-detail-drawer wiring.
 
 ### Changed
+- Collection event storage and dashboard details now avoid personal collector/actor identifiers and keep only image/post target context.
+- Project documentation now focuses on current usage, with old release-body drafts removed from the active doc set.
 - Source-mode fallback launch scripts now fail with clearer setup guidance when Python or UI dependencies are missing.
 - `install_requirements.bat` now validates Python 3.11+, backs up unusable local environments, installs dependencies into `.venv`, and verifies CustomTkinter.
 - Dashboard guide now describes the Performance view as both a compact board and detailed table.
+
+## v10.3.1
+
+### Changed
+- Simplified Collections activity rows in the Dashboard.
+- Removed a low-value collection event metadata column from user-facing collection activity views.
 
 ## v10.3.0
 

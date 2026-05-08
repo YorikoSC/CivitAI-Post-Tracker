@@ -24,7 +24,7 @@ Source-mode users update through Git:
 
 ```powershell
 git pull
-python -m pip install -r requirements.txt
+.\install_requirements.bat
 ```
 
 Then launch the app and run **Diagnostics**.
@@ -103,7 +103,7 @@ Avoid using an older executable with a database that has already been migrated b
 
 The app performs small SQLite migrations at startup or run time. These are automatic, but a database backup is still recommended before major updates.
 
-Older config keys are normalized:
+Legacy config keys are normalized:
 
 - `options.enable_buzz_ingest` maps to collection tracking.
 - `collection_tracking.max_pages` maps into bootstrap and maintenance page limits.

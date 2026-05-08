@@ -16,8 +16,8 @@ body:
     id: version
     attributes:
       label: App version
-      description: Example: 10.3.0
-      placeholder: "10.3.0"
+      description: Example: 10.4.0
+      placeholder: "10.4.0"
     validations:
       required: true
 

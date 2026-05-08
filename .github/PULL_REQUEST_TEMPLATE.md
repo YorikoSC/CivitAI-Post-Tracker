@@ -4,7 +4,7 @@ Describe what changed and why.
 
 ## Checks
 
-- [ ] `python tests\smoke_tests.py`
+- [ ] `.venv\Scripts\python.exe tests\smoke_tests.py`
 - [ ] `git diff --check`
 - [ ] Documentation updated if behavior changed
 - [ ] No local runtime data, API keys, databases, logs, or release artifacts committed

@@ -8,6 +8,7 @@
 - Adds a Timing board for best posting hours, weekdays, and the recommendation basis.
 - Adds a History board for all-time and early-window leaders.
 - Lets performance cards open the existing post detail drawer, matching table-row behavior.
+- Keeps collection event storage and dashboard details focused on image/post identifiers instead of collector/actor identifiers.
 - Improves source-mode setup and fallback launcher diagnostics around the local `.venv`.
 
 ## Upgrade Notes
