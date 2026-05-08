@@ -33,5 +33,5 @@ package_release.bat
 If GitHub Release assets are unavailable on your network, publish the same ZIP to a direct-download mirror and include:
 
 ```text
-Update package mirror: https://example.com/CivitAITracker-v10.3.0-win64.zip
+Update package mirror: https://sourceforge.net/projects/civitai-post-tracker/files/CivitAITracker-v10.3.0-win64.zip/download
 ```
