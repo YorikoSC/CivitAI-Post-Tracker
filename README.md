@@ -187,6 +187,8 @@ The export is UTF-8 CSV with comma separators and stable filenames. Timestamps a
 
 The export is meant for external analysis rather than dashboard viewing. You can load it into pandas, spreadsheets, scripts, or an AI assistant to inspect posting history and growth patterns.
 
+View-count columns are present for schema stability, but the CivitAI source currently used by the tracker does not provide view counts, so those fields are blank. Tags and image metadata are filled only when the current source returns them; image metadata is refreshed during normal tracker runs.
+
 From source mode, the same export can be generated without fetching new data:
 
 ```powershell

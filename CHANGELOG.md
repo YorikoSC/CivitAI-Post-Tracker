@@ -6,6 +6,8 @@
 - Analysis-ready data export from the desktop app and CLI.
 - `analytics_export/` output with posts, snapshots, snapshot-to-snapshot deltas, images, and export metadata.
 - Optional image metadata storage for width, height, prompt, negative prompt, model, sampler, steps, CFG, and seed when those fields are available from CivitAI responses.
+- Export metadata notes for currently unavailable view-count fields.
+- Sample elapsed/distance columns for first-window reaction aggregates.
 
 ## v10.4.0
 

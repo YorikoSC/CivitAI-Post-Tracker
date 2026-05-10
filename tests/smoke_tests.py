@@ -38,7 +38,9 @@ from tracker_service import (
     init_db,
     load_post_deltas,
     load_snapshots_by_post,
+    make_image_payload,
     normalize_image,
+    normalize_post,
     render_dashboard,
     write_dashboard_html,
 )
@@ -879,20 +881,35 @@ class AnalyticsExportSmokeTests(unittest.TestCase):
         self.assertEqual(result["total_posts_exported"], 1)
         self.assertEqual(metadata["username"], "tester")
         self.assertEqual(metadata["total_snapshots_exported"], 2)
+        self.assertEqual(metadata["views_source"], "unavailable")
+        self.assertIn("view counts", metadata["field_notes"]["view_count"])
         self.assertEqual(summary_rows[0]["published_at_utc"], "2026-05-07T09:00:00Z")
         self.assertEqual(summary_rows[0]["published_at_local"], "2026-05-07T12:00:00+03:00")
         self.assertEqual(summary_rows[0]["publish_hour_utc"], "9")
         self.assertEqual(summary_rows[0]["publish_hour_local"], "12")
         self.assertEqual(summary_rows[0]["publish_weekday_local"], "Thu")
+        self.assertEqual(summary_rows[0]["post_title"], "Exported post")
+        self.assertEqual(summary_rows[0]["current_view_count"], "")
         self.assertEqual(summary_rows[0]["current_collection_count"], "2")
         self.assertEqual(summary_rows[0]["reactions_2h"], "3")
         self.assertEqual(summary_rows[0]["reactions_2h_is_estimated"], "false")
+        self.assertEqual(summary_rows[0]["reactions_2h_sample_elapsed_hours"], "2.0")
+        self.assertEqual(summary_rows[0]["reactions_2h_sample_distance_hours"], "0.0")
         self.assertEqual(summary_rows[0]["reactions_24h"], "10")
         self.assertEqual(summary_rows[0]["reactions_24h_is_estimated"], "true")
+        self.assertEqual(summary_rows[0]["reactions_24h_sample_elapsed_hours"], "26.0")
+        self.assertEqual(summary_rows[0]["reactions_24h_sample_distance_hours"], "2.0")
+        self.assertEqual(summary_rows[0]["reactions_48h"], "")
+        self.assertEqual(summary_rows[0]["reactions_48h_is_estimated"], "")
+        self.assertEqual(summary_rows[0]["reactions_48h_sample_elapsed_hours"], "26.0")
+        self.assertEqual(summary_rows[0]["reactions_48h_sample_distance_hours"], "22.0")
         self.assertEqual(summary_rows[0]["collections_24h"], "1")
+        self.assertEqual(snapshot_rows[0]["post_title"], "Exported post")
         self.assertEqual(snapshot_rows[0]["collection_count"], "1")
         self.assertEqual(snapshot_rows[1]["collection_count"], "2")
+        self.assertEqual(delta_rows[0]["post_title"], "Exported post")
         self.assertEqual(delta_rows[0]["delta_collections"], "1")
+        self.assertEqual(image_rows[0]["post_title"], "Exported post")
         self.assertEqual(image_rows[0]["aspect_ratio"], "0.5")
         self.assertEqual(image_rows[0]["model_name"], "Test Model")
         self.assertNotIn("999", combined_csv)
@@ -1134,6 +1151,9 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertTrue(rows[0]["period_year"])
 
     def test_image_enrichment_keeps_preview_urls(self) -> None:
+        payload = make_image_payload(username="tester")
+        self.assertTrue(payload["json"]["withMeta"])
+
         normalized = normalize_image(
             {
                 "id": 2001,
@@ -1167,6 +1187,22 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertEqual(normalized["steps"], 24)
         self.assertEqual(normalized["cfg"], 6.5)
         self.assertEqual(normalized["seed"], "1234")
+
+    def test_post_normalization_keeps_available_tags(self) -> None:
+        normalized = normalize_post(
+            {
+                "id": 1001,
+                "name": "Tagged post",
+                "publishedAt": "2026-05-04T09:00:00Z",
+                "tags": [{"name": "alpha"}, {"name": "beta"}, {"name": "alpha"}],
+                "stats": {"likeCount": 1, "heartCount": 2, "laughCount": 0, "cryCount": 0, "commentCount": 1},
+            },
+            username="tester",
+        )
+
+        self.assertIsNotNone(normalized)
+        self.assertEqual(normalized["title"], "Tagged post")
+        self.assertEqual(normalized["tag_list"], "alpha|beta")
 
     def test_image_enrichment_builds_civitai_cache_urls_from_uuid(self) -> None:
         normalized = normalize_image(

@@ -36,6 +36,13 @@ REQUEST_PAGE_DELAY_SECONDS = 0.5
 WEEKDAY_NAMES = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 STAT_KEYS = ["likeCount", "heartCount", "laughCount", "cryCount", "commentCount"]
 CIVITAI_IMAGE_CACHE_ROOT = "https://imagecache.civitai.com/xG1nkqKTMzGDvpLrqFT7WA"
+ANALYTICS_WINDOW_MAX_DISTANCE_HOURS = {
+    2: 1.0,
+    6: 2.0,
+    12: 3.0,
+    24: 6.0,
+    48: 12.0,
+}
 
 
 def utc_now() -> datetime:
@@ -148,6 +155,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             post_id INTEGER NOT NULL,
             username TEXT,
             title TEXT,
+            tag_list TEXT,
             published_at TEXT,
             captured_at TEXT NOT NULL,
             source_host TEXT,
@@ -171,6 +179,7 @@ def init_db(conn: sqlite3.Connection) -> None:
             post_id INTEGER NOT NULL,
             username TEXT,
             title TEXT,
+            tag_list TEXT,
             published_at TEXT,
             detected_at TEXT NOT NULL,
             source_host TEXT,
@@ -219,7 +228,9 @@ def init_db(conn: sqlite3.Connection) -> None:
 
     ensure_column(conn, "post_snapshots", "source_kind", "TEXT")
     ensure_column(conn, "post_snapshots", "title", "TEXT")
+    ensure_column(conn, "post_snapshots", "tag_list", "TEXT")
     ensure_column(conn, "post_deltas", "title", "TEXT")
+    ensure_column(conn, "post_deltas", "tag_list", "TEXT")
     ensure_column(conn, "post_images", "image_url", "TEXT")
     ensure_column(conn, "post_images", "thumbnail_url", "TEXT")
     ensure_column(conn, "post_images", "width", "INTEGER")
@@ -304,7 +315,7 @@ def make_post_payload(username: str, cursor: Any = None) -> Dict[str, Any]:
     return payload
 
 
-def make_image_payload(username: str, cursor: Any = None, with_meta: bool = False) -> Dict[str, Any]:
+def make_image_payload(username: str, cursor: Any = None, with_meta: bool = True) -> Dict[str, Any]:
     payload = {
         "json": {
             "useIndex": True,
@@ -375,7 +386,7 @@ def fetch_images_trpc(session: requests.Session, host: str, username: str, timeo
         session=session,
         host=host,
         procedure="image.getInfinite",
-        payload_factory=lambda cursor: make_image_payload(username=username, cursor=cursor, with_meta=False),
+        payload_factory=lambda cursor: make_image_payload(username=username, cursor=cursor, with_meta=True),
         timeout=timeout,
     )
 
@@ -606,6 +617,40 @@ def parse_size_value(value: Any) -> Tuple[Optional[int], Optional[int]]:
     return safe_int(match.group(1)), safe_int(match.group(2))
 
 
+def normalize_tag_list(item: dict) -> str:
+    raw_values = first_metadata_value(
+        item.get("tags"),
+        item.get("tagNames"),
+        item.get("tag_list"),
+        item.get("tagList"),
+    )
+    if raw_values is None:
+        return ""
+    if isinstance(raw_values, str):
+        parts = re.split(r"[|,]", raw_values)
+    elif isinstance(raw_values, list):
+        parts = []
+        for value in raw_values:
+            if isinstance(value, dict):
+                parts.append(first_metadata_value(value.get("name"), value.get("tag"), value.get("label"), value.get("value")))
+            else:
+                parts.append(value)
+    else:
+        return ""
+
+    tags: List[str] = []
+    seen: Set[str] = set()
+    for part in parts:
+        if part is None:
+            continue
+        text = str(part).strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        tags.append(text)
+    return "|".join(tags)
+
+
 def extract_image_metadata(item: dict) -> Dict[str, Any]:
     meta = item.get("meta") if isinstance(item.get("meta"), dict) else {}
     metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
@@ -678,6 +723,7 @@ def normalize_post(item: dict, username: str) -> Optional[dict]:
         "post_id": post_id,
         "username": author,
         "title": str(title or ""),
+        "tag_list": normalize_tag_list(item),
         "published_at": published_at,
         "source_host": item.get("_source_host"),
         "stats_known": 1 if known else 0,
@@ -731,16 +777,17 @@ def insert_post_snapshot(conn: sqlite3.Connection, row: dict, captured_at: str, 
     cur.execute(
         """
         INSERT INTO post_snapshots (
-            post_id, username, title, published_at, captured_at,
+            post_id, username, title, tag_list, published_at, captured_at,
             source_host, source_kind, stats_known,
             like_count, heart_count, laugh_count, cry_count, comment_count,
             reaction_total, engagement_total
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row["post_id"],
             row["username"],
             row["title"],
+            row.get("tag_list"),
             row["published_at"],
             captured_at,
             row.get("source_host"),
@@ -762,15 +809,16 @@ def insert_post_delta(conn: sqlite3.Connection, row: dict) -> None:
     cur.execute(
         """
         INSERT INTO post_deltas (
-            post_id, username, title, published_at, detected_at, source_host,
+            post_id, username, title, tag_list, published_at, detected_at, source_host,
             like_delta, heart_delta, laugh_delta, cry_delta, comment_delta,
             reaction_total_delta, engagement_total_delta
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             row["post_id"],
             row["username"],
             row["title"],
+            row.get("tag_list"),
             row["published_at"],
             row["detected_at"],
             row.get("source_host"),
@@ -836,6 +884,7 @@ def process_posts(
             "post_id": row["post_id"],
             "username": row["username"],
             "title": row["title"],
+            "tag_list": row.get("tag_list"),
             "published_at": row["published_at"],
             "detected_at": captured_at,
             "source_host": row.get("source_host"),
@@ -1538,7 +1587,7 @@ def export_csvs(conn: sqlite3.Connection, csv_dir: str, tz_helper: TimezoneHelpe
     export_query_to_csv(
         conn,
         """
-        SELECT id, post_id, username, title, published_at, captured_at, source_host, source_kind,
+        SELECT id, post_id, username, title, tag_list, published_at, captured_at, source_host, source_kind,
                stats_known, like_count, heart_count, laugh_count, cry_count, comment_count,
                reaction_total, engagement_total
         FROM post_snapshots
@@ -1550,7 +1599,7 @@ def export_csvs(conn: sqlite3.Connection, csv_dir: str, tz_helper: TimezoneHelpe
     export_query_to_csv(
         conn,
         """
-        SELECT id, post_id, username, title, published_at, detected_at, source_host,
+        SELECT id, post_id, username, title, tag_list, published_at, detected_at, source_host,
                like_delta, heart_delta, laugh_delta, cry_delta, comment_delta,
                reaction_total_delta, engagement_total_delta
         FROM post_deltas
@@ -1633,14 +1682,24 @@ ANALYTICS_SUMMARY_COLUMNS = [
     "current_creator_follower_count",
     "reactions_2h",
     "reactions_2h_is_estimated",
+    "reactions_2h_sample_elapsed_hours",
+    "reactions_2h_sample_distance_hours",
     "reactions_6h",
     "reactions_6h_is_estimated",
+    "reactions_6h_sample_elapsed_hours",
+    "reactions_6h_sample_distance_hours",
     "reactions_12h",
     "reactions_12h_is_estimated",
+    "reactions_12h_sample_elapsed_hours",
+    "reactions_12h_sample_distance_hours",
     "reactions_24h",
     "reactions_24h_is_estimated",
+    "reactions_24h_sample_elapsed_hours",
+    "reactions_24h_sample_distance_hours",
     "reactions_48h",
     "reactions_48h_is_estimated",
+    "reactions_48h_sample_elapsed_hours",
+    "reactions_48h_sample_distance_hours",
     "collections_24h",
     "comments_24h",
     "views_24h",
@@ -1653,6 +1712,7 @@ ANALYTICS_SUMMARY_COLUMNS = [
 
 ANALYTICS_SNAPSHOT_COLUMNS = [
     "post_id",
+    "post_title",
     "captured_at_utc",
     "captured_at_local",
     "published_at_utc",
@@ -1669,6 +1729,7 @@ ANALYTICS_SNAPSHOT_COLUMNS = [
 
 ANALYTICS_DELTA_COLUMNS = [
     "post_id",
+    "post_title",
     "from_captured_at_utc",
     "to_captured_at_utc",
     "delta_hours",
@@ -1684,6 +1745,7 @@ ANALYTICS_DELTA_COLUMNS = [
 
 ANALYTICS_IMAGE_COLUMNS = [
     "post_id",
+    "post_title",
     "image_id",
     "image_index",
     "image_url",
@@ -1799,6 +1861,48 @@ def joined_unique_text(rows: Sequence[sqlite3.Row], key: str) -> str:
     return "|".join(values)
 
 
+def build_title_by_post(
+    current_posts: Sequence[sqlite3.Row],
+    snapshots_by_post: Dict[int, List[sqlite3.Row]],
+) -> Dict[int, str]:
+    titles: Dict[int, str] = {}
+    for post in current_posts:
+        post_id = safe_int(row_value(post, "post_id"))
+        title = str(row_value(post, "title", "") or "").strip()
+        if post_id is not None and title:
+            titles[post_id] = title
+    for post_id, snapshots in snapshots_by_post.items():
+        if titles.get(post_id):
+            continue
+        for snapshot in reversed(snapshots):
+            title = str(row_value(snapshot, "title", "") or "").strip()
+            if title:
+                titles[post_id] = title
+                break
+    return titles
+
+
+def build_tags_by_post(
+    current_posts: Sequence[sqlite3.Row],
+    snapshots_by_post: Dict[int, List[sqlite3.Row]],
+) -> Dict[int, str]:
+    tags: Dict[int, str] = {}
+    for post in current_posts:
+        post_id = safe_int(row_value(post, "post_id"))
+        tag_list = str(row_value(post, "tag_list", "") or "").strip()
+        if post_id is not None and tag_list:
+            tags[post_id] = tag_list
+    for post_id, snapshots in snapshots_by_post.items():
+        if tags.get(post_id):
+            continue
+        for snapshot in reversed(snapshots):
+            tag_list = str(row_value(snapshot, "tag_list", "") or "").strip()
+            if tag_list:
+                tags[post_id] = tag_list
+                break
+    return tags
+
+
 def load_images_by_post_for_export(conn: sqlite3.Connection) -> Dict[int, List[sqlite3.Row]]:
     cur = conn.cursor()
     cur.execute(
@@ -1869,22 +1973,31 @@ def nearest_snapshot_metric(
     published_value: Optional[str],
     metric: str,
     hours: int,
-) -> Tuple[Optional[int], Optional[bool]]:
+) -> Dict[str, Any]:
     published_dt = parse_datetime_utc(published_value)
     if published_dt is None:
-        return None, None
+        return {"value": None, "is_estimated": None, "sample_elapsed_hours": None, "sample_distance_hours": None}
     target_dt = published_dt + timedelta(hours=hours)
-    candidates: List[Tuple[float, sqlite3.Row]] = []
+    candidates: List[Tuple[float, float, sqlite3.Row]] = []
     for row in snapshots_by_post.get(post_id, []):
         value = row_value(row, metric)
         captured_dt = parse_datetime_utc(row_value(row, "captured_at"))
         if value is None or captured_dt is None:
             continue
-        candidates.append((abs((captured_dt - target_dt).total_seconds()), row))
+        distance_hours = abs((captured_dt - target_dt).total_seconds()) / 3600
+        sample_elapsed = (captured_dt - published_dt).total_seconds() / 3600
+        candidates.append((distance_hours, sample_elapsed, row))
     if not candidates:
-        return None, None
-    distance_seconds, snapshot = min(candidates, key=lambda item: item[0])
-    return safe_int(row_value(snapshot, metric)), distance_seconds > 1
+        return {"value": None, "is_estimated": None, "sample_elapsed_hours": None, "sample_distance_hours": None}
+    distance_hours, sample_elapsed, snapshot = min(candidates, key=lambda item: item[0])
+    max_distance = ANALYTICS_WINDOW_MAX_DISTANCE_HOURS.get(hours, max(1.0, hours * 0.25))
+    accepted = distance_hours <= max_distance
+    return {
+        "value": safe_int(row_value(snapshot, metric)) if accepted else None,
+        "is_estimated": distance_hours > (1 / 3600) if accepted else None,
+        "sample_elapsed_hours": sample_elapsed,
+        "sample_distance_hours": distance_hours,
+    }
 
 
 def metric_delta(previous: sqlite3.Row, current: sqlite3.Row, metric: str) -> Optional[int]:
@@ -1901,6 +2014,8 @@ def build_analytics_posts_summary_rows(
     images_by_post: Dict[int, List[sqlite3.Row]],
     collections_available: bool,
     collection_events_by_post: Dict[int, List[datetime]],
+    title_by_post: Dict[int, str],
+    tags_by_post: Dict[int, str],
     tz_helper: TimezoneHelper,
     view_host: str,
 ) -> List[Dict[str, Any]]:
@@ -1916,7 +2031,7 @@ def build_analytics_posts_summary_rows(
 
         row: Dict[str, Any] = {
             "post_id": post_id,
-            "post_title": row_value(post, "title", ""),
+            "post_title": title_by_post.get(post_id, ""),
             "post_url": post_url(view_host, post_id),
             "published_at_utc": iso_utc(published_at),
             "published_at_local": iso_local(published_at, tz_helper),
@@ -1925,7 +2040,7 @@ def build_analytics_posts_summary_rows(
             "publish_weekday_local": WEEKDAY_NAMES[published_local_dt.weekday()] if published_local_dt is not None else "",
             "nsfw_level": nsfw_level,
             "rating": nsfw_level,
-            "tag_list": "",
+            "tag_list": tags_by_post.get(post_id, ""),
             "image_count": len(images),
             "current_view_count": "",
             "current_reaction_total": row_value(post, "reaction_total"),
@@ -1946,12 +2061,14 @@ def build_analytics_posts_summary_rows(
         }
 
         for hours in (2, 6, 12, 24, 48):
-            value, estimated = nearest_snapshot_metric(snapshots_by_post, post_id, published_at, "reaction_total", hours)
-            row[f"reactions_{hours}h"] = value
-            row[f"reactions_{hours}h_is_estimated"] = estimated
+            sample = nearest_snapshot_metric(snapshots_by_post, post_id, published_at, "reaction_total", hours)
+            row[f"reactions_{hours}h"] = sample["value"]
+            row[f"reactions_{hours}h_is_estimated"] = sample["is_estimated"]
+            row[f"reactions_{hours}h_sample_elapsed_hours"] = sample["sample_elapsed_hours"]
+            row[f"reactions_{hours}h_sample_distance_hours"] = sample["sample_distance_hours"]
 
-        comments_24h, _ = nearest_snapshot_metric(snapshots_by_post, post_id, published_at, "comment_count", 24)
-        row["comments_24h"] = comments_24h
+        comments_24h = nearest_snapshot_metric(snapshots_by_post, post_id, published_at, "comment_count", 24)
+        row["comments_24h"] = comments_24h["value"]
         rows.append(row)
 
     return rows
@@ -1961,6 +2078,7 @@ def build_analytics_snapshot_rows(
     snapshots_by_post: Dict[int, List[sqlite3.Row]],
     collections_available: bool,
     collection_events_by_post: Dict[int, List[datetime]],
+    title_by_post: Dict[int, str],
     tz_helper: TimezoneHelper,
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
@@ -1971,6 +2089,7 @@ def build_analytics_snapshot_rows(
             rows.append(
                 {
                     "post_id": post_id,
+                    "post_title": row_value(snapshot, "title") or title_by_post.get(post_id, ""),
                     "captured_at_utc": iso_utc(captured_at),
                     "captured_at_local": iso_local(captured_at, tz_helper),
                     "published_at_utc": iso_utc(published_at),
@@ -1992,6 +2111,7 @@ def build_analytics_delta_rows(
     snapshots_by_post: Dict[int, List[sqlite3.Row]],
     collections_available: bool,
     collection_events_by_post: Dict[int, List[datetime]],
+    title_by_post: Dict[int, str],
 ) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for post_id in sorted(snapshots_by_post):
@@ -2004,6 +2124,7 @@ def build_analytics_delta_rows(
             rows.append(
                 {
                     "post_id": post_id,
+                    "post_title": row_value(current, "title") or row_value(previous, "title") or title_by_post.get(post_id, ""),
                     "from_captured_at_utc": iso_utc(previous_captured),
                     "to_captured_at_utc": iso_utc(current_captured),
                     "delta_hours": elapsed_hours(previous_captured, current_captured),
@@ -2020,7 +2141,10 @@ def build_analytics_delta_rows(
     return rows
 
 
-def build_analytics_image_rows(images_by_post: Dict[int, List[sqlite3.Row]]) -> List[Dict[str, Any]]:
+def build_analytics_image_rows(
+    images_by_post: Dict[int, List[sqlite3.Row]],
+    title_by_post: Dict[int, str],
+) -> List[Dict[str, Any]]:
     rows: List[Dict[str, Any]] = []
     for post_id in sorted(images_by_post):
         for image in images_by_post[post_id]:
@@ -2029,6 +2153,7 @@ def build_analytics_image_rows(images_by_post: Dict[int, List[sqlite3.Row]]) -> 
             rows.append(
                 {
                     "post_id": post_id,
+                    "post_title": title_by_post.get(post_id, ""),
                     "image_id": row_value(image, "image_id"),
                     "image_index": row_value(image, "position"),
                     "image_url": row_value(image, "image_url"),
@@ -2059,6 +2184,8 @@ def export_analytics_dataset(
     current_posts = get_current_posts(conn)
     snapshots_by_post = load_snapshots_by_post(conn)
     images_by_post = load_images_by_post_for_export(conn)
+    title_by_post = build_title_by_post(current_posts, snapshots_by_post)
+    tags_by_post = build_tags_by_post(current_posts, snapshots_by_post)
     collections_available, collection_events_by_post = load_collection_event_times_by_post(conn)
 
     summary_rows = build_analytics_posts_summary_rows(
@@ -2067,6 +2194,8 @@ def export_analytics_dataset(
         images_by_post=images_by_post,
         collections_available=collections_available,
         collection_events_by_post=collection_events_by_post,
+        title_by_post=title_by_post,
+        tags_by_post=tags_by_post,
         tz_helper=tz_helper,
         view_host=view_host,
     )
@@ -2074,14 +2203,16 @@ def export_analytics_dataset(
         snapshots_by_post=snapshots_by_post,
         collections_available=collections_available,
         collection_events_by_post=collection_events_by_post,
+        title_by_post=title_by_post,
         tz_helper=tz_helper,
     )
     delta_rows = build_analytics_delta_rows(
         snapshots_by_post=snapshots_by_post,
         collections_available=collections_available,
         collection_events_by_post=collection_events_by_post,
+        title_by_post=title_by_post,
     )
-    image_rows = build_analytics_image_rows(images_by_post)
+    image_rows = build_analytics_image_rows(images_by_post, title_by_post)
 
     write_dict_csv(os.path.join(output_dir, "posts_summary.csv"), ANALYTICS_SUMMARY_COLUMNS, summary_rows)
     write_dict_csv(os.path.join(output_dir, "post_snapshots.csv"), ANALYTICS_SNAPSHOT_COLUMNS, snapshot_rows)
@@ -2098,6 +2229,16 @@ def export_analytics_dataset(
         "total_deltas_exported": len(delta_rows),
         "total_images_exported": len(image_rows),
         "collections_available": collections_available,
+        "views_source": "unavailable",
+        "field_notes": {
+            "current_view_count": "The CivitAI source currently used by the tracker does not provide view counts, so this field is left blank.",
+            "view_count": "The CivitAI source currently used by the tracker does not provide view counts, so this field is left blank.",
+            "views_24h": "The CivitAI source currently used by the tracker does not provide view counts, so this field is left blank.",
+            "tag_list": "Filled only when the current post source returns tag data.",
+            "image_metadata": "Image metadata is refreshed during tracker runs from image.getInfinite with metadata enabled when CivitAI provides it.",
+            "reaction_window_samples": "Reaction window values are filled only when the nearest snapshot is within the configured maximum distance for that window.",
+        },
+        "reaction_window_max_distance_hours": ANALYTICS_WINDOW_MAX_DISTANCE_HOURS,
         "files": [
             "posts_summary.csv",
             "post_snapshots.csv",

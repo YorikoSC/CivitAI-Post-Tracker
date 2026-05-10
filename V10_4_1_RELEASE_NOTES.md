@@ -28,11 +28,14 @@ export_metadata.json
 - UTF-8 CSV output with comma separators.
 - UTC timestamps plus local timestamps based on the configured profile timezone.
 - Snapshot-to-snapshot deltas for reactions, comments, and collection counts.
+- First-window reaction samples include elapsed/distance columns and are left blank when the nearest snapshot is too far from the target time.
 - Optional image metadata storage for width, height, prompt, negative prompt, model, sampler, steps, CFG, and seed when CivitAI provides those fields.
 
 ## Data Scope
 
 The export is meant for external analysis, including AI-assisted analysis. It focuses on tracked posts, snapshots, deltas, images, and aggregate counts rather than the full internal database.
+
+View-count columns are included for a stable export shape, but the current CivitAI source used by the tracker does not provide view counts, so those fields are blank.
 
 ## Upgrade Notes
 
