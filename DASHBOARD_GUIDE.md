@@ -128,6 +128,10 @@ The header includes a `generated ...` timestamp. If the dashboard looks stale, r
 
 The dashboard page auto-refreshes itself every 5 minutes. This reloads the local HTML view; it does not trigger a tracker run or fetch new CivitAI data. Background polling is controlled by the app's polling interval.
 
+## Raw Export
+
+For external analysis, use **Export data** in the app instead of scraping the dashboard HTML. It writes clean CSV files for posts, snapshots, deltas, images, and export metadata.
+
 ## Limits
 
 The dashboard is a decision aid. It does not predict future performance, judge content quality, or guarantee that a suggested time window will outperform another one.

@@ -76,6 +76,7 @@ Do not include:
 - `api_key.txt`
 - `*.db`
 - `csv/`
+- `analytics_export/`
 - `logs/`
 - `dashboard.html`
 - `runtime_status.json`

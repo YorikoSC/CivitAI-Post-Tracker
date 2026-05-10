@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Analysis-ready data export from the desktop app and CLI.
+- `analytics_export/` output with posts, snapshots, snapshot-to-snapshot deltas, images, and export metadata.
+- Optional image metadata storage for width, height, prompt, negative prompt, model, sampler, steps, CFG, and seed when those fields are available from CivitAI responses.
+
 ## v10.4.0
 
 ### Added

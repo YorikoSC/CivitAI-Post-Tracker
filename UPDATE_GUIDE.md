@@ -11,6 +11,7 @@ config.json
 api_key.txt
 civitai_tracker.db
 csv/
+analytics_export/
 logs/
 dashboard.html
 runtime_status.json

@@ -25,7 +25,7 @@ The source code is licensed under the MIT License. That license grants broad rig
 
 - Tracks CivitAI posts from a configured start point.
 - Stores current reaction/comment totals and historical snapshots in SQLite.
-- Exports local CSV snapshots.
+- Exports local CSV snapshots and a clean analytics CSV package.
 - Generates a local HTML dashboard with boards, tables, preview thumbnails, charts, and collection analytics.
 - Tracks collection additions for your images when authenticated access is available.
 - Runs manual checks or automatic polling from a tray-enabled desktop UI.
@@ -127,6 +127,9 @@ The most important settings live in `config.json`. Start from `config.example.js
     "start_date": null,
     "poll_minutes": 15
   },
+  "paths": {
+    "analytics_export_dir": "analytics_export"
+  },
   "options": {
     "check_updates_on_launch": true,
     "enable_collection_tracking": true
@@ -170,6 +173,26 @@ The dashboard is generated as `dashboard.html` and opened from the desktop app. 
 
 See `DASHBOARD_GUIDE.md` for interpretation notes and known limits.
 
+## Analytics Export
+
+Use **Export data** in the desktop app to write analysis-ready files to `analytics_export/` by default:
+
+- `posts_summary.csv`
+- `post_snapshots.csv`
+- `post_deltas.csv`
+- `post_images.csv`
+- `export_metadata.json`
+
+The export is UTF-8 CSV with comma separators and stable filenames. Timestamps are ISO 8601; UTC fields use `Z`, and local fields use the configured profile timezone. Unknown values are left blank.
+
+The export is meant for pandas, notebooks, or external analysis rather than dashboard viewing. It keeps post/image identifiers and collection counts, but does not export private collector or actor identifiers.
+
+From source mode, the same export can be generated without fetching new data:
+
+```powershell
+.venv\Scripts\python.exe tracker_service.py --export-analytics
+```
+
 ## Updates
 
 Source-mode users update through Git, then rerun `install_requirements.bat`.
@@ -196,6 +219,7 @@ Runtime files are local and should not be committed:
 - `api_key.txt`
 - `civitai_tracker.db`
 - `csv/`
+- `analytics_export/`
 - `logs/`
 - `dashboard.html`
 - `runtime_status.json`

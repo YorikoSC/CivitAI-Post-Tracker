@@ -3,6 +3,7 @@ api_key.txt
 *.db
 *.sqlite
 csv/
+analytics_export/
 dashboard.html
 runtime_status.json
 .civitai_tracker.lock

@@ -117,6 +117,7 @@ def default_config() -> dict[str, Any]:
         "paths": {
             "db": "civitai_tracker.db",
             "csv_dir": "csv",
+            "analytics_export_dir": "analytics_export",
             "html": "dashboard.html",
         },
         "options": {

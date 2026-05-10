@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import json
 import sqlite3
 import shutil
@@ -32,6 +33,7 @@ from tracker_runner import TrackerRunner
 from tracker_service import (
     TimezoneHelper,
     build_post_performance_rows,
+    export_analytics_dataset,
     get_current_posts,
     init_db,
     load_post_deltas,
@@ -712,6 +714,191 @@ class CollectionIngestSmokeTests(unittest.TestCase):
         self.assertTrue(second["bootstrap_completed"])
 
 
+class AnalyticsExportSmokeTests(unittest.TestCase):
+    def test_analytics_export_writes_clean_files_without_private_collection_fields(self) -> None:
+        db_path = smoke_path("analytics_export", ".db")
+        export_dir = smoke_path("analytics_export", "")
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+
+        published_at = datetime(2026, 5, 7, 9, 0, 0, tzinfo=timezone.utc)
+        first_capture = published_at + timedelta(hours=2)
+        second_capture = published_at + timedelta(hours=26)
+
+        try:
+            init_db(conn)
+            conn.execute(
+                """
+                INSERT INTO post_snapshots (
+                    post_id, username, title, published_at, captured_at,
+                    source_host, source_kind, stats_known,
+                    like_count, heart_count, laugh_count, cry_count, comment_count,
+                    reaction_total, engagement_total
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1001,
+                    "tester",
+                    "Exported post",
+                    published_at.isoformat(),
+                    first_capture.isoformat(),
+                    "https://civitai.red",
+                    "test",
+                    1,
+                    2,
+                    1,
+                    0,
+                    0,
+                    1,
+                    3,
+                    4,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO post_snapshots (
+                    post_id, username, title, published_at, captured_at,
+                    source_host, source_kind, stats_known,
+                    like_count, heart_count, laugh_count, cry_count, comment_count,
+                    reaction_total, engagement_total
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1001,
+                    "tester",
+                    "Exported post",
+                    published_at.isoformat(),
+                    second_capture.isoformat(),
+                    "https://civitai.red",
+                    "test",
+                    1,
+                    6,
+                    2,
+                    1,
+                    1,
+                    2,
+                    10,
+                    12,
+                ),
+            )
+            conn.execute(
+                """
+                INSERT INTO post_images (
+                    post_id, image_id, position, image_created_at, nsfw, nsfw_level,
+                    image_url, thumbnail_url, width, height, prompt_text, negative_prompt,
+                    model_name, sampler, steps, cfg, seed, source_host, captured_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    1001,
+                    2001,
+                    1,
+                    published_at.isoformat(),
+                    "false",
+                    "Soft",
+                    "https://image.civitai.com/full.jpeg",
+                    "https://image.civitai.com/thumb.jpeg",
+                    512,
+                    1024,
+                    "a prompt",
+                    "negative",
+                    "Test Model",
+                    "Euler",
+                    30,
+                    7.5,
+                    "12345",
+                    "https://civitai.red",
+                    second_capture.isoformat(),
+                ),
+            )
+            conn.execute(
+                """
+                CREATE TABLE content_engagement_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_time TEXT,
+                    normalized_type TEXT,
+                    related_post_id INTEGER,
+                    by_user_id INTEGER,
+                    to_user_id INTEGER,
+                    to_username TEXT,
+                    description TEXT
+                )
+                """
+            )
+            conn.execute(
+                """
+                INSERT INTO content_engagement_events (
+                    event_time, normalized_type, related_post_id, by_user_id, to_user_id, to_username, description
+                ) VALUES (?, ?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    (published_at + timedelta(hours=1)).isoformat(),
+                    "collection_like",
+                    1001,
+                    999,
+                    111,
+                    "collector_one",
+                    "private one",
+                    (published_at + timedelta(hours=25)).isoformat(),
+                    "collection_like",
+                    1001,
+                    998,
+                    112,
+                    "collector_two",
+                    "private two",
+                ),
+            )
+            conn.commit()
+
+            result = export_analytics_dataset(
+                conn=conn,
+                output_dir=str(export_dir),
+                tz_helper=TimezoneHelper("Europe/Moscow"),
+                username="tester",
+                view_host="https://civitai.red",
+            )
+
+            with (export_dir / "posts_summary.csv").open(encoding="utf-8") as f:
+                summary_rows = list(csv.DictReader(f))
+            with (export_dir / "post_snapshots.csv").open(encoding="utf-8") as f:
+                snapshot_rows = list(csv.DictReader(f))
+            with (export_dir / "post_deltas.csv").open(encoding="utf-8") as f:
+                delta_rows = list(csv.DictReader(f))
+            with (export_dir / "post_images.csv").open(encoding="utf-8") as f:
+                image_rows = list(csv.DictReader(f))
+            metadata = json.loads((export_dir / "export_metadata.json").read_text(encoding="utf-8"))
+            combined_csv = "\n".join(path.read_text(encoding="utf-8") for path in export_dir.glob("*.csv"))
+        finally:
+            conn.close()
+            try:
+                db_path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            shutil.rmtree(export_dir, ignore_errors=True)
+
+        self.assertEqual(result["total_posts_exported"], 1)
+        self.assertEqual(metadata["username"], "tester")
+        self.assertEqual(metadata["total_snapshots_exported"], 2)
+        self.assertEqual(summary_rows[0]["published_at_utc"], "2026-05-07T09:00:00Z")
+        self.assertEqual(summary_rows[0]["published_at_local"], "2026-05-07T12:00:00+03:00")
+        self.assertEqual(summary_rows[0]["publish_hour_utc"], "9")
+        self.assertEqual(summary_rows[0]["publish_hour_local"], "12")
+        self.assertEqual(summary_rows[0]["publish_weekday_local"], "Thu")
+        self.assertEqual(summary_rows[0]["current_collection_count"], "2")
+        self.assertEqual(summary_rows[0]["reactions_2h"], "3")
+        self.assertEqual(summary_rows[0]["reactions_2h_is_estimated"], "false")
+        self.assertEqual(summary_rows[0]["reactions_24h"], "10")
+        self.assertEqual(summary_rows[0]["reactions_24h_is_estimated"], "true")
+        self.assertEqual(summary_rows[0]["collections_24h"], "1")
+        self.assertEqual(snapshot_rows[0]["collection_count"], "1")
+        self.assertEqual(snapshot_rows[1]["collection_count"], "2")
+        self.assertEqual(delta_rows[0]["delta_collections"], "1")
+        self.assertEqual(image_rows[0]["aspect_ratio"], "0.5")
+        self.assertEqual(image_rows[0]["model_name"], "Test Model")
+        self.assertNotIn("999", combined_csv)
+        self.assertNotIn("collector_one", combined_csv)
+
+
 class DashboardSmokeTests(unittest.TestCase):
     def test_dashboard_write_replaces_existing_file(self) -> None:
         dashboard_path = smoke_path("dashboard", ".html")
@@ -954,6 +1141,16 @@ class DashboardSmokeTests(unittest.TestCase):
                 "createdAt": "2026-05-04T09:00:00Z",
                 "url": "https://image.civitai.com/full.jpeg",
                 "urls": {"small": "https://image.civitai.com/small.jpeg"},
+                "meta": {
+                    "Size": "512x768",
+                    "Prompt": "soft light",
+                    "Negative prompt": "blur",
+                    "Model": "Example Model",
+                    "Sampler": "Euler",
+                    "Steps": "24",
+                    "cfgScale": "6.5",
+                    "Seed": 1234,
+                },
                 "_source_host": "https://civitai.red",
             }
         )
@@ -961,6 +1158,15 @@ class DashboardSmokeTests(unittest.TestCase):
         self.assertIsNotNone(normalized)
         self.assertEqual(normalized["image_url"], "https://image.civitai.com/full.jpeg")
         self.assertEqual(normalized["thumbnail_url"], "https://image.civitai.com/small.jpeg")
+        self.assertEqual(normalized["width"], 512)
+        self.assertEqual(normalized["height"], 768)
+        self.assertEqual(normalized["prompt_text"], "soft light")
+        self.assertEqual(normalized["negative_prompt"], "blur")
+        self.assertEqual(normalized["model_name"], "Example Model")
+        self.assertEqual(normalized["sampler"], "Euler")
+        self.assertEqual(normalized["steps"], 24)
+        self.assertEqual(normalized["cfg"], 6.5)
+        self.assertEqual(normalized["seed"], "1234")
 
     def test_image_enrichment_builds_civitai_cache_urls_from_uuid(self) -> None:
         normalized = normalize_image(
