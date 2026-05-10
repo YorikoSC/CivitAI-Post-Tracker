@@ -140,6 +140,9 @@ STATUS_OK = "#7ee787"
 STATUS_RUN = "#f2cc60"
 STATUS_ERR = "#ff9b9b"
 STATUS_IDLE = "#9baacf"
+UPDATE_BADGE_BG = "#ef4444"
+UPDATE_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
+UPDATE_CHECK_RETRY_SECONDS = 60 * 60
 CUSTOM_TK_AVAILABLE = ctk is not None
 AppRoot = ctk.CTk if CUSTOM_TK_AVAILABLE else tk.Tk
 DialogWindow = ctk.CTkToplevel if CUSTOM_TK_AVAILABLE else tk.Toplevel
@@ -1045,7 +1048,7 @@ class SettingsDialog(DialogWindow):
         row = self._add_help(self.app_tab, row, "Automatically start background polling when the app launches. Recommended for startup and tray-only use.")
         make_checkbox(self.app_tab, "Check for updates on launch", self.check_updates_on_launch_var).grid(row=row, column=0, columnspan=2, sticky="w")
         row += 1
-        row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts.")
+        row = self._add_help(self.app_tab, row, "Check GitHub releases in the background when the app starts and periodically while it stays open.")
         self._add_help(self.app_tab, row, "Closing the window sends the app to the tray. Use Exit app or the tray menu to exit fully.")
 
     def _show_timezone_examples(self):
@@ -1289,7 +1292,7 @@ class DiagnosticsDialog(DialogWindow):
 
 
 class UpdateDialog(DialogWindow):
-    def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path):
+    def __init__(self, master: tk.Misc, runtime_dir: Path, execution_mode: str, open_path, on_update_info=None):
         super().__init__(master)
         self.title("Updates")
         apply_window_icon(self, getattr(master, "bundle_dir", runtime_dir))
@@ -1298,6 +1301,7 @@ class UpdateDialog(DialogWindow):
         self.runtime_dir = runtime_dir
         self.execution_mode = execution_mode
         self.open_path = open_path
+        self.on_update_info = on_update_info
         self.info: UpdateInfo | None = None
         self.asset: ReleaseAsset | None = None
         self.downloaded_path: Path | None = None
@@ -1498,6 +1502,8 @@ class UpdateDialog(DialogWindow):
 
     def _apply_update_info(self, info: UpdateInfo):
         self.info = info
+        if self.on_update_info:
+            self.on_update_info(info)
         self.asset = choose_download_asset(info, self.execution_mode)
         self.latest_var.set(info.latest_tag or info.latest_version)
         if self.asset:
@@ -1748,6 +1754,10 @@ class TrackerApp(AppRoot):
         self.tray_icon = None
         self._closing_to_tray = True
         self._after_ids: set[str] = set()
+        self.update_check_in_progress = False
+        self.update_check_after_id: str | None = None
+        self.latest_update_info: UpdateInfo | None = None
+        self.update_available = False
         self._build_ui()
         self._schedule(400, self._pump_logs)
         self._schedule(1000, self._refresh_status)
@@ -1908,7 +1918,12 @@ class TrackerApp(AppRoot):
         self.start_auto_btn = make_button(actions, "Start auto", self.start_auto)
         self.stop_auto_btn = make_button(actions, "Stop auto", self.stop_auto)
         self.settings_btn = make_button(actions, "Settings", self.open_settings)
-        self.updates_btn = make_button(actions, "Updates", self.open_updates)
+        self.updates_slot = tk.Frame(actions, bg=CARD_BG)
+        self.updates_btn = make_button(self.updates_slot, "Updates", self.open_updates)
+        self.updates_btn.pack(fill="both", expand=True)
+        self.updates_badge = tk.Canvas(self.updates_slot, width=12, height=12, bg=CARD_BG, highlightthickness=0, borderwidth=0)
+        self.updates_badge.create_oval(2, 2, 10, 10, fill=UPDATE_BADGE_BG, outline=UPDATE_BADGE_BG)
+        self.updates_badge.place_forget()
         self.diagnostics_btn = make_button(actions, "Diagnostics", self.open_diagnostics)
         self.data_btn = make_button(actions, "Data folder", self.open_data_folder)
         self.export_btn = make_button(actions, "Export data", self.export_analytics)
@@ -1922,7 +1937,7 @@ class TrackerApp(AppRoot):
             (self.start_auto_btn, 1, 0, 1),
             (self.stop_auto_btn, 1, 1, 1),
             (self.settings_btn, 1, 2, 1),
-            (self.updates_btn, 2, 0, 1),
+            (self.updates_slot, 2, 0, 1),
             (self.diagnostics_btn, 2, 1, 1),
             (self.data_btn, 2, 2, 1),
             (self.export_btn, 3, 0, 1),
@@ -2104,6 +2119,18 @@ class TrackerApp(AppRoot):
 
         self._schedule(1000, self._refresh_status)
 
+    def _set_updates_badge(self, visible: bool):
+        self.update_available = bool(visible)
+        if not hasattr(self, "updates_badge"):
+            return
+        try:
+            if visible:
+                self.updates_badge.place(relx=1.0, x=-8, y=7, anchor="ne")
+            else:
+                self.updates_badge.place_forget()
+        except tk.TclError:
+            pass
+
     def run_now(self):
         threading.Thread(target=self.runner.run_once, daemon=True).start()
 
@@ -2172,21 +2199,68 @@ class TrackerApp(AppRoot):
         DiagnosticsDialog(self, report)
 
     def open_updates(self):
-        UpdateDialog(self, self.runtime_dir, get_execution_mode(), self._open_path)
+        UpdateDialog(
+            self,
+            self.runtime_dir,
+            get_execution_mode(),
+            self._open_path,
+            on_update_info=self._apply_update_check_info,
+        )
 
     def _check_updates_on_launch(self):
+        self._check_updates_background()
+
+    def _updates_check_enabled(self) -> bool:
+        cfg = load_json_config(self.config_path) if self.config_path.exists() else self.config_data
+        return bool(deep_get(cfg, "options.check_updates_on_launch", True))
+
+    def _schedule_next_update_check(self, delay_seconds: int):
+        if not self._updates_check_enabled():
+            self.update_check_after_id = None
+            return
+        if self.update_check_after_id:
+            try:
+                self.after_cancel(self.update_check_after_id)
+            except tk.TclError:
+                pass
+            self._after_ids.discard(self.update_check_after_id)
+        self.update_check_after_id = self._schedule(int(delay_seconds * 1000), self._check_updates_background)
+
+    def _check_updates_background(self):
+        if not self._updates_check_enabled():
+            self._set_updates_badge(False)
+            self.update_check_after_id = None
+            return
+        if self.update_check_in_progress:
+            return
+        self.update_check_in_progress = True
         threading.Thread(target=self._startup_update_worker, daemon=True).start()
 
     def _startup_update_worker(self):
         try:
             info = fetch_latest_release(current_version=APP_VERSION, timeout_seconds=12)
-        except Exception:
+        except Exception as exc:
+            self._schedule(0, self._handle_update_check_error, str(exc))
             return
+        self._schedule(0, self._apply_update_check_info, info)
+
+    def _handle_update_check_error(self, _message: str):
+        self.update_check_in_progress = False
+        self._schedule_next_update_check(UPDATE_CHECK_RETRY_SECONDS)
+
+    def _apply_update_check_info(self, info: UpdateInfo):
+        was_available = self.update_available
+        self.latest_update_info = info
+        self.update_check_in_progress = False
+        self._set_updates_badge(info.update_available)
         if not info.update_available:
+            self._schedule_next_update_check(UPDATE_CHECK_INTERVAL_SECONDS)
             return
         latest = info.latest_tag or info.latest_version
-        self._enqueue_log(f"Update available: {latest}. Open Updates to download it.")
-        self._schedule(0, self._set_status_line, f"Update available: {latest}.")
+        if not was_available:
+            self._enqueue_log(f"Update available: {latest}. Open Updates to download it.")
+            self._set_status_line(f"Update available: {latest}.")
+        self._schedule_next_update_check(UPDATE_CHECK_INTERVAL_SECONDS)
 
     def _apply_startup_diagnostics(self, hidden_launch: bool):
         report = self.last_diagnostics_report or {}
@@ -2234,8 +2308,17 @@ class TrackerApp(AppRoot):
                 self._enqueue_log("Auto polling on launch is disabled.")
             if deep_get(cfg, "options.check_updates_on_launch", True):
                 self._enqueue_log("Update check on launch is enabled.")
+                self._schedule_next_update_check(5)
             else:
                 self._enqueue_log("Update check on launch is disabled.")
+                self._set_updates_badge(False)
+                if self.update_check_after_id:
+                    try:
+                        self.after_cancel(self.update_check_after_id)
+                    except tk.TclError:
+                        pass
+                    self._after_ids.discard(self.update_check_after_id)
+                    self.update_check_after_id = None
 
         SettingsDialog(self, self.runtime_dir, current, on_save)
 

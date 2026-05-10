@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- Background update availability checks while the app is open.
+- Main-window update marker on the **Updates** action when a newer release is available.
+
 ## v10.4.1
 
 ### Added
