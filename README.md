@@ -29,7 +29,7 @@ The source code is licensed under the MIT License. That license grants broad rig
 - Generates a local HTML dashboard with boards, tables, preview thumbnails, charts, and collection analytics.
 - Tracks collection additions for your images when authenticated access is available.
 - Runs manual checks or automatic polling from a tray-enabled desktop UI.
-- Checks GitHub Releases for portable EXE updates.
+- Checks GitHub Releases for portable EXE updates and marks the Updates action when a newer version is available.
 
 ## Requirements
 
@@ -68,6 +68,8 @@ Create `config.json` from `config.example.json`, then launch:
 ```powershell
 .\launch_tracker.pyw
 ```
+
+On a new app folder, the desktop UI opens a first-run setup wizard for profile, access mode, tracking start point, and the optional first scan.
 
 For fallback startup with console diagnostics:
 
@@ -109,7 +111,7 @@ The package is written to `release\CivitAITracker-v<version>-win64.zip`.
 
 ## Configuration Basics
 
-The most important settings live in `config.json`. Start from `config.example.json` and edit the values you need:
+The first-run wizard covers the required fields for normal use. The same values live in `config.json`, and advanced options can be edited there or from **Settings**:
 
 ```json
 {
@@ -200,6 +202,8 @@ From source mode, the same export can be generated without fetching new data:
 Source-mode users update through Git, then rerun `install_requirements.bat`.
 
 EXE users can use **Updates** in the app to check the latest GitHub Release, download a compatible portable ZIP package, and apply it automatically. Automatic apply is available only in the packaged EXE build.
+
+When update checks are enabled, the app checks in the background on launch and periodically while it stays open. If a newer release is found, the main Updates action shows a small marker.
 
 The updater preserves local runtime data and stores replaced app files under `updates\backup-<timestamp>\`. Keep your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` before major updates.
 

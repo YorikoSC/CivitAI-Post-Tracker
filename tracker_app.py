@@ -707,6 +707,79 @@ def extract_post_id(value: str) -> int | None:
     return None
 
 
+def build_first_run_config(
+    *,
+    username: str,
+    display_name: str,
+    timezone_name: str,
+    access_mode: str,
+    api_key: str,
+    api_key_file: str,
+    start_mode: str,
+    start_post_value: str,
+    start_day: str,
+    start_month: str,
+    start_year: str,
+    poll_minutes: str,
+    start_auto_polling_on_launch: bool,
+    check_updates_on_launch: bool,
+) -> tuple[dict, str | None]:
+    cfg = default_config()
+
+    username = username.strip()
+    if not username:
+        raise ValueError("Username is required.")
+
+    timezone_name = timezone_name.strip() or "UTC"
+    if not is_valid_timezone_name(timezone_name):
+        raise ValueError(timezone_error_message())
+
+    cfg["profile"]["username"] = username
+    cfg["profile"]["display_name"] = display_name.strip() or username
+    cfg["profile"]["timezone"] = timezone_name
+
+    api_key = api_key.strip()
+    api_key_file = api_key_file.strip() or "api_key.txt"
+    materialized_key: str | None = None
+    if access_mode == "api_key":
+        if not api_key:
+            raise ValueError("Paste an API key, or choose limited public mode.")
+        cfg["auth"]["api_key"] = ""
+        cfg["auth"]["api_key_file"] = api_key_file
+        materialized_key = api_key
+    else:
+        cfg["auth"]["api_key"] = ""
+        cfg["auth"]["api_key_file"] = ""
+
+    cfg["tracking"]["start_mode"] = start_mode.strip() or "post_id"
+    if cfg["tracking"]["start_mode"] == "post_id":
+        post_id = extract_post_id(start_post_value)
+        if post_id is None:
+            raise ValueError("Paste a valid CivitAI post ID or post URL.")
+        cfg["tracking"]["start_post_id"] = post_id
+        cfg["tracking"]["start_date"] = None
+    elif cfg["tracking"]["start_mode"] == "date":
+        if not (start_day.strip() and start_month.strip() and start_year.strip()):
+            raise ValueError("Enter a valid start date using DD / MM / YYYY.")
+        try:
+            parsed = date(int(start_year), int(start_month), int(start_day))
+        except ValueError as exc:
+            raise ValueError("Enter a valid calendar date.") from exc
+        cfg["tracking"]["start_post_id"] = None
+        cfg["tracking"]["start_date"] = parsed.strftime("%Y-%m-%d")
+    else:
+        raise ValueError("Choose a valid tracking start mode.")
+
+    cfg["tracking"]["poll_minutes"] = normalize_poll_minutes(poll_minutes)
+    cfg["options"]["start_auto_polling_on_launch"] = bool(start_auto_polling_on_launch)
+    cfg["options"]["check_updates_on_launch"] = bool(check_updates_on_launch)
+
+    errors = validate_config(cfg)
+    if errors:
+        raise ValueError("\n".join(errors))
+    return cfg, materialized_key
+
+
 class SingleInstanceLock:
     def __init__(self, path: Path):
         self.path = path
@@ -1170,6 +1243,446 @@ class SettingsDialog(DialogWindow):
         self.status_var.set("Settings saved successfully.")
         self.on_save(cfg)
         self.destroy()
+
+
+class SetupWizardDialog(DialogWindow):
+    STEP_TITLES = ("Welcome", "Profile", "Access", "Tracking", "Finish")
+
+    def __init__(self, master: tk.Misc, base_dir: Path, config: dict, on_save):
+        super().__init__(master)
+        self.title("CivitAI Tracker First Setup")
+        apply_window_icon(self, getattr(master, "bundle_dir", base_dir))
+        self.geometry("860x720")
+        self.minsize(780, 660)
+        self.base_dir = base_dir
+        self.on_save = on_save
+        self.step = 0
+
+        self.username_var = tk.StringVar(value=deep_get(config, "profile.username", ""))
+        self.display_name_var = tk.StringVar(value=deep_get(config, "profile.display_name", ""))
+        self.timezone_var = tk.StringVar(value=deep_get(config, "profile.timezone", "UTC") or "UTC")
+
+        key_file = deep_get(config, "auth.api_key_file", "api_key.txt") or "api_key.txt"
+        inline_key = deep_get(config, "auth.api_key", "")
+        try:
+            file_has_key = bool(key_file) and (self.base_dir / key_file).exists()
+        except TypeError:
+            file_has_key = False
+        self.access_mode_var = tk.StringVar(value="api_key" if inline_key or file_has_key else "limited")
+        self.api_key_var = tk.StringVar(value=inline_key)
+        self.api_key_file_var = tk.StringVar(value=key_file)
+
+        self.start_mode_var = tk.StringVar(value=deep_get(config, "tracking.start_mode", "post_id") or "post_id")
+        self.start_post_var = tk.StringVar(value=str(deep_get(config, "tracking.start_post_id", "") or ""))
+        self.start_day_var = tk.StringVar()
+        self.start_month_var = tk.StringVar()
+        self.start_year_var = tk.StringVar()
+        iso_date = str(deep_get(config, "tracking.start_date", "") or "")
+        if iso_date:
+            try:
+                y, m, d = iso_date.split("-")
+                self.start_day_var.set(d)
+                self.start_month_var.set(m)
+                self.start_year_var.set(y)
+            except Exception:
+                pass
+        if not self.start_day_var.get():
+            today = date.today()
+            self.start_day_var.set(f"{today.day:02d}")
+            self.start_month_var.set(f"{today.month:02d}")
+            self.start_year_var.set(str(today.year))
+
+        self.poll_minutes_var = tk.StringVar(
+            value=str(normalize_poll_minutes(deep_get(config, "tracking.poll_minutes", DEFAULT_POLL_MINUTES)))
+        )
+        self.run_first_scan_var = tk.BooleanVar(value=True)
+        self.start_auto_polling_var = tk.BooleanVar(
+            value=bool(deep_get(config, "options.start_auto_polling_on_launch", False))
+        )
+        self.check_updates_var = tk.BooleanVar(value=bool(deep_get(config, "options.check_updates_on_launch", True)))
+        self.status_var = tk.StringVar(value="This setup only asks for the fields needed to start tracking.")
+        self.step_var = tk.StringVar()
+
+        self._build()
+        self.transient(master)
+        self.grab_set()
+        self.protocol("WM_DELETE_WINDOW", self.destroy)
+
+    def _build(self):
+        set_surface_color(self, APP_BG)
+        apply_desktop_theme(self)
+        container = tk.Frame(self, bg=APP_BG, padx=18, pady=18)
+        container.pack(fill="both", expand=True)
+        container.columnconfigure(0, weight=1)
+        container.rowconfigure(2, weight=1)
+
+        header = make_dialog_header(
+            container,
+            "First setup",
+            "Set the account, access mode, and tracking start point. Advanced options stay in Settings.",
+        )
+        header.grid(row=0, column=0, sticky="ew")
+
+        step_bar = tk.Frame(container, bg=APP_BG)
+        step_bar.grid(row=1, column=0, sticky="ew", pady=(14, 10))
+        step_bar.columnconfigure(0, weight=1)
+        tk.Label(step_bar, textvariable=self.step_var, bg=APP_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(row=0, column=0, sticky="w")
+
+        self.content = tk.Frame(container, bg=CARD_BG, padx=20, pady=20, highlightthickness=1, highlightbackground=BORDER_FG)
+        self.content.grid(row=2, column=0, sticky="nsew")
+
+        footer = tk.Frame(container, bg=APP_BG)
+        footer.grid(row=3, column=0, sticky="ew", pady=(12, 0))
+        footer.columnconfigure(0, weight=1)
+        tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=520, justify="left").grid(row=0, column=0, sticky="w")
+        buttons = tk.Frame(footer, bg=APP_BG)
+        buttons.grid(row=0, column=1, sticky="e")
+        self.back_btn = make_button(buttons, "Back", self._back)
+        self.back_btn.pack(side="left", padx=(0, 8))
+        make_button(buttons, "Cancel", self.destroy).pack(side="left", padx=(0, 8))
+        self.next_btn = make_button(buttons, "Next", self._next, kind="primary")
+        self.next_btn.pack(side="left")
+
+        self._render_step()
+
+    def _clear_content(self):
+        for child in self.content.winfo_children():
+            child.destroy()
+        self.content.columnconfigure(0, weight=0)
+        self.content.columnconfigure(1, weight=1)
+
+    def _render_step(self):
+        self._clear_content()
+        self.step_var.set(f"Step {self.step + 1} of {len(self.STEP_TITLES)}: {self.STEP_TITLES[self.step]}")
+        builders = (
+            self._build_welcome_step,
+            self._build_profile_step,
+            self._build_access_step,
+            self._build_tracking_step,
+            self._build_finish_step,
+        )
+        builders[self.step]()
+        self._update_footer()
+
+    def _update_footer(self):
+        self.back_btn.configure(state=("normal" if self.step > 0 else "disabled"))
+        if self.step == len(self.STEP_TITLES) - 1:
+            self.next_btn.configure(text="Save", command=self._save)
+        else:
+            self.next_btn.configure(text="Next", command=self._next)
+
+    def _add_title(self, title: str, text: str) -> int:
+        tk.Label(self.content, text=title, bg=CARD_BG, fg=HEADER_FG, font=ui_font(18, "bold"), justify="left").grid(
+            row=0,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+        tk.Label(self.content, text=text, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), justify="left", wraplength=660).grid(
+            row=1,
+            column=0,
+            columnspan=2,
+            sticky="w",
+            pady=(8, 20),
+        )
+        return 2
+
+    def _entry_row(self, row: int, label: str, variable: tk.StringVar, *, width: int = 42, help_text: str | None = None, show: str | None = None):
+        tk.Label(self.content, text=label, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        entry = make_entry(self.content, variable, width=width, show=show)
+        entry.grid(row=row, column=1, sticky="ew", pady=(0, 5))
+        row += 1
+        if help_text:
+            tk.Label(self.content, text=help_text, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=540, justify="left").grid(
+                row=row,
+                column=1,
+                sticky="w",
+                pady=(0, 14),
+            )
+            row += 1
+        return entry, row
+
+    def _build_welcome_step(self):
+        row = self._add_title(
+            "Welcome",
+            "The tracker needs only a few choices before the first run. You can change every advanced option later.",
+        )
+        points = (
+            "Your public CivitAI username and local timezone.",
+            "Limited public mode, or full mode with your own CivitAI API key.",
+            "Where tracking should start: a post ID, post URL, or date.",
+        )
+        for point in points:
+            tk.Label(self.content, text=f"- {point}", bg=CARD_BG, fg=HEADER_FG, font=ui_font(13), justify="left", wraplength=650).grid(
+                row=row,
+                column=0,
+                columnspan=2,
+                sticky="w",
+                pady=(0, 10),
+            )
+            row += 1
+        self.status_var.set("This setup writes config.json and keeps local data in this app folder.")
+
+    def _build_profile_step(self):
+        row = self._add_title(
+            "Profile",
+            "This is the account whose posts will be tracked. Local time is used for dashboard labels and exports.",
+        )
+        _, row = self._entry_row(row, "CivitAI username", self.username_var, help_text="Use the public username from your CivitAI profile URL.")
+        _, row = self._entry_row(row, "Display name", self.display_name_var, help_text="Optional. Leave empty to reuse the username.")
+
+        tk.Label(self.content, text="Timezone", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        tz_row = tk.Frame(self.content, bg=CARD_BG)
+        tz_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
+        tz_row.columnconfigure(0, weight=1)
+        make_entry(tz_row, self.timezone_var).grid(row=0, column=0, sticky="ew")
+        make_button(tz_row, "Examples", self._show_timezone_examples).grid(row=0, column=1, padx=(8, 0))
+        row += 1
+        tk.Label(
+            self.content,
+            text="Use IANA format, for example Europe/Moscow or America/New_York.",
+            bg=CARD_BG,
+            fg=SUBTEXT_FG,
+            font=ui_font(12),
+            justify="left",
+            wraplength=540,
+        ).grid(row=row, column=1, sticky="w")
+        self.status_var.set("Profile fields are required for clean local history.")
+
+    def _build_access_step(self):
+        row = self._add_title(
+            "Access",
+            "An API key is optional. Limited public mode can start without a key; full mode stores your key in a local file.",
+        )
+        tk.Label(self.content, text="Mode", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        mode_row = tk.Frame(self.content, bg=CARD_BG)
+        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 12))
+        make_radio(mode_row, "Limited public mode", self.access_mode_var, "limited", self._toggle_access_mode).pack(side="left")
+        make_radio(mode_row, "Use API key", self.access_mode_var, "api_key", self._toggle_access_mode).pack(side="left", padx=(14, 0))
+        row += 1
+
+        self.api_key_entry, row = self._entry_row(row, "API key", self.api_key_var, show="*", help_text="Only needed for full mode. The key is not shown in the app after saving.")
+        tk.Label(self.content, text="Key file", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        file_row = tk.Frame(self.content, bg=CARD_BG)
+        file_row.grid(row=row, column=1, sticky="ew", pady=(0, 5))
+        file_row.columnconfigure(0, weight=1)
+        self.api_key_file_entry = make_entry(file_row, self.api_key_file_var)
+        self.api_key_file_entry.grid(row=0, column=0, sticky="ew")
+        self.api_key_file_btn = make_button(file_row, "Browse", self._browse_key_file)
+        self.api_key_file_btn.grid(row=0, column=1, padx=(8, 0))
+        row += 1
+        tk.Label(
+            self.content,
+            text="File mode keeps secrets out of config.json and is safer for sharing project files.",
+            bg=CARD_BG,
+            fg=SUBTEXT_FG,
+            font=ui_font(12),
+            wraplength=540,
+            justify="left",
+        ).grid(row=row, column=1, sticky="w")
+        self._toggle_access_mode()
+        self.status_var.set("Limited mode is fine for a first run if you do not want to add a key now.")
+
+    def _build_tracking_step(self):
+        row = self._add_title(
+            "Tracking start",
+            "Choose the oldest point the tracker should care about. A recent post ID is usually the easiest start.",
+        )
+        tk.Label(self.content, text="Start from", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        mode_row = tk.Frame(self.content, bg=CARD_BG)
+        mode_row.grid(row=row, column=1, sticky="w", pady=(0, 12))
+        make_radio(mode_row, "Post ID or URL", self.start_mode_var, "post_id", self._toggle_start_mode).pack(side="left")
+        make_radio(mode_row, "Date", self.start_mode_var, "date", self._toggle_start_mode).pack(side="left", padx=(14, 0))
+        row += 1
+
+        self.start_post_entry, row = self._entry_row(row, "Start post", self.start_post_var, help_text="Paste a numeric post ID or a full CivitAI post URL.")
+
+        tk.Label(self.content, text="Start date", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).grid(
+            row=row,
+            column=0,
+            sticky="w",
+            pady=(0, 6),
+            padx=(0, 14),
+        )
+        date_row = tk.Frame(self.content, bg=CARD_BG)
+        date_row.grid(row=row, column=1, sticky="w", pady=(0, 5))
+        self.start_day_entry = make_entry(date_row, self.start_day_var, width=4, justify="center")
+        self.start_day_entry.pack(side="left")
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=5)
+        self.start_month_entry = make_entry(date_row, self.start_month_var, width=4, justify="center")
+        self.start_month_entry.pack(side="left")
+        tk.Label(date_row, text="/", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=5)
+        self.start_year_entry = make_entry(date_row, self.start_year_var, width=6, justify="center")
+        self.start_year_entry.pack(side="left")
+        tk.Label(date_row, text="DD / MM / YYYY", bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12)).pack(side="left", padx=(10, 0))
+        row += 1
+
+        _, row = self._entry_row(
+            row,
+            "Poll interval",
+            self.poll_minutes_var,
+            width=8,
+            help_text=f"Auto polling interval in minutes. Minimum: {MIN_POLL_MINUTES}.",
+        )
+        self._toggle_start_mode()
+        self.status_var.set("The first scan uses this starting point to build local history.")
+
+    def _build_finish_step(self):
+        row = self._add_title(
+            "Finish",
+            "Save the setup and start working. These choices can be changed later from Settings.",
+        )
+        make_checkbox(self.content, "Run first scan after saving", self.run_first_scan_var).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row += 1
+        make_checkbox(self.content, "Start auto polling when the app launches", self.start_auto_polling_var).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 10))
+        row += 1
+        make_checkbox(self.content, "Check for updates in the background", self.check_updates_var).grid(row=row, column=0, columnspan=2, sticky="w", pady=(0, 18))
+        row += 1
+
+        summary = (
+            "Files used by this local copy:\n"
+            "- config.json for settings\n"
+            "- civitai_tracker.db for history\n"
+            "- dashboard.html for the local dashboard\n"
+            "- analytics_export/ for CSV export"
+        )
+        tk.Label(self.content, text=summary, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12), justify="left", wraplength=650).grid(
+            row=row,
+            column=0,
+            columnspan=2,
+            sticky="w",
+        )
+        self.status_var.set("Save writes config.json. The first scan can be started immediately.")
+
+    def _show_timezone_examples(self):
+        messagebox.showinfo(
+            "Timezone examples",
+            "Use an IANA timezone name, for example\n\n" + "\n".join(TIMEZONE_EXAMPLES),
+            parent=self,
+        )
+
+    def _browse_key_file(self):
+        path = filedialog.asksaveasfilename(
+            title="Select API key file",
+            defaultextension=".txt",
+            initialfile=self.api_key_file_var.get() or "api_key.txt",
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
+        )
+        if path:
+            try:
+                path = str(Path(path).resolve().relative_to(self.base_dir.resolve()))
+            except Exception:
+                path = str(Path(path).resolve())
+            self.api_key_file_var.set(path)
+
+    def _toggle_access_mode(self):
+        state = "normal" if self.access_mode_var.get() == "api_key" else "disabled"
+        for widget_name in ("api_key_entry", "api_key_file_entry", "api_key_file_btn"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(state=state)
+
+    def _toggle_start_mode(self):
+        use_date = self.start_mode_var.get() == "date"
+        for widget_name in ("start_post_entry",):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(state=("disabled" if use_date else "normal"))
+        state = "normal" if use_date else "disabled"
+        for widget_name in ("start_day_entry", "start_month_entry", "start_year_entry"):
+            widget = getattr(self, widget_name, None)
+            if widget is not None:
+                widget.configure(state=state)
+
+    def _build_config(self) -> tuple[dict, str | None]:
+        return build_first_run_config(
+            username=self.username_var.get(),
+            display_name=self.display_name_var.get(),
+            timezone_name=self.timezone_var.get(),
+            access_mode=self.access_mode_var.get(),
+            api_key=self.api_key_var.get(),
+            api_key_file=self.api_key_file_var.get(),
+            start_mode=self.start_mode_var.get(),
+            start_post_value=self.start_post_var.get(),
+            start_day=self.start_day_var.get(),
+            start_month=self.start_month_var.get(),
+            start_year=self.start_year_var.get(),
+            poll_minutes=self.poll_minutes_var.get(),
+            start_auto_polling_on_launch=bool(self.start_auto_polling_var.get()),
+            check_updates_on_launch=bool(self.check_updates_var.get()),
+        )
+
+    def _validate_current_step(self) -> bool:
+        try:
+            if self.step == 1:
+                if not self.username_var.get().strip():
+                    raise ValueError("Username is required.")
+                if not is_valid_timezone_name(self.timezone_var.get().strip() or "UTC"):
+                    raise ValueError(timezone_error_message())
+            elif self.step == 2 and self.access_mode_var.get() == "api_key" and not self.api_key_var.get().strip():
+                raise ValueError("Paste an API key, or choose limited public mode.")
+            elif self.step == 3:
+                self._build_config()
+        except ValueError as exc:
+            messagebox.showerror("First setup", str(exc), parent=self)
+            return False
+        return True
+
+    def _next(self):
+        if not self._validate_current_step():
+            return
+        if self.step < len(self.STEP_TITLES) - 1:
+            self.step += 1
+            self._render_step()
+
+    def _back(self):
+        if self.step > 0:
+            self.step -= 1
+            self._render_step()
+
+    def _save(self):
+        try:
+            cfg, materialized_key = self._build_config()
+        except ValueError as exc:
+            messagebox.showerror("First setup", str(exc), parent=self)
+            return
+
+        save_json_config(cfg, self.base_dir / "config.json")
+        materialize_api_key(cfg, materialized_key, self.base_dir)
+        self.status_var.set("Setup saved successfully.")
+        self.on_save(cfg, bool(self.run_first_scan_var.get()))
+        self.destroy()
+
 
 class DiagnosticsDialog(DialogWindow):
     def __init__(self, master: tk.Misc, report: dict):
@@ -1746,11 +2259,13 @@ class TrackerApp(AppRoot):
         self.base_dir = self.runtime_dir
         configure_font_system(self, self.bundle_dir)
         apply_window_icon(self, self.bundle_dir)
-        ensure_example_copied_if_missing(self.runtime_dir, self.bundle_dir)
         self.config_path = self.runtime_dir / "config.json"
+        self.config_existed_at_launch = self.config_path.exists()
+        ensure_example_copied_if_missing(self.runtime_dir, self.bundle_dir)
         self.log_queue: queue.Queue[str] = queue.Queue()
         self.runner = TrackerRunner(self.runtime_dir, "config.json", log_callback=self._enqueue_log)
         self.last_diagnostics_report: dict | None = None
+        self.needs_first_run_setup = False
         self.tray_icon = None
         self._closing_to_tray = True
         self._after_ids: set[str] = set()
@@ -1763,6 +2278,7 @@ class TrackerApp(AppRoot):
         self._schedule(1000, self._refresh_status)
 
         self.config_data = load_json_config(self.config_path) if self.config_path.exists() else default_config()
+        self.needs_first_run_setup = (not self.config_existed_at_launch) or bool(validate_config(self.config_data))
         self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
         if deep_get(self.config_data, "options.launch_with_windows", False):
             set_windows_autostart(
@@ -1771,8 +2287,8 @@ class TrackerApp(AppRoot):
                 start_minimized=bool(deep_get(self.config_data, "options.start_minimized", False)),
             )
 
-        if not self.config_path.exists():
-            self._schedule(250, self.open_settings)
+        if self.needs_first_run_setup:
+            self._schedule(250, self.open_setup_wizard)
 
         self.protocol("WM_DELETE_WINDOW", self._on_close)
         self.runner.set_app_mode("window")
@@ -2290,37 +2806,48 @@ class TrackerApp(AppRoot):
         except Exception as exc:
             messagebox.showerror("Open path failed", str(exc))
 
-    def open_settings(self):
+    def _handle_config_saved(self, cfg: dict):
+        self.config_data = cfg
+        self.needs_first_run_setup = False
+        self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
+        self._enqueue_log("Configuration saved.")
+        self._enqueue_log(startup_check_summary(self.last_diagnostics_report))
+        if deep_get(cfg, "options.launch_with_windows", False):
+            self._enqueue_log("Windows autostart enabled.")
+        else:
+            self._enqueue_log("Windows autostart disabled.")
+        if deep_get(cfg, "options.start_auto_polling_on_launch", False):
+            self._enqueue_log("Auto polling will start automatically on launch.")
+        else:
+            self._enqueue_log("Auto polling on launch is disabled.")
+        if deep_get(cfg, "options.check_updates_on_launch", True):
+            self._enqueue_log("Update check on launch is enabled.")
+            self._schedule_next_update_check(5)
+        else:
+            self._enqueue_log("Update check on launch is disabled.")
+            self._set_updates_badge(False)
+            if self.update_check_after_id:
+                try:
+                    self.after_cancel(self.update_check_after_id)
+                except tk.TclError:
+                    pass
+                self._after_ids.discard(self.update_check_after_id)
+                self.update_check_after_id = None
+
+    def open_setup_wizard(self):
         current = load_json_config(self.config_path) if self.config_path.exists() else default_config()
 
-        def on_save(cfg):
-            self.config_data = cfg
-            self.last_diagnostics_report = run_startup_self_check(self.runtime_dir, self.bundle_dir, self.config_path, self.config_data)
-            self._enqueue_log("Configuration saved.")
-            self._enqueue_log(startup_check_summary(self.last_diagnostics_report))
-            if deep_get(cfg, "options.launch_with_windows", False):
-                self._enqueue_log("Windows autostart enabled.")
-            else:
-                self._enqueue_log("Windows autostart disabled.")
-            if deep_get(cfg, "options.start_auto_polling_on_launch", False):
-                self._enqueue_log("Auto polling will start automatically on launch.")
-            else:
-                self._enqueue_log("Auto polling on launch is disabled.")
-            if deep_get(cfg, "options.check_updates_on_launch", True):
-                self._enqueue_log("Update check on launch is enabled.")
-                self._schedule_next_update_check(5)
-            else:
-                self._enqueue_log("Update check on launch is disabled.")
-                self._set_updates_badge(False)
-                if self.update_check_after_id:
-                    try:
-                        self.after_cancel(self.update_check_after_id)
-                    except tk.TclError:
-                        pass
-                    self._after_ids.discard(self.update_check_after_id)
-                    self.update_check_after_id = None
+        def on_save(cfg, run_first_scan: bool):
+            self._handle_config_saved(cfg)
+            self._enqueue_log("First setup complete.")
+            if run_first_scan:
+                self._schedule(350, self.run_now)
 
-        SettingsDialog(self, self.runtime_dir, current, on_save)
+        SetupWizardDialog(self, self.runtime_dir, current, on_save)
+
+    def open_settings(self):
+        current = load_json_config(self.config_path) if self.config_path.exists() else default_config()
+        SettingsDialog(self, self.runtime_dir, current, self._handle_config_saved)
 
     def _create_tray_image(self):
         icon_path = find_app_asset(APP_ICON_PNG, self.bundle_dir)

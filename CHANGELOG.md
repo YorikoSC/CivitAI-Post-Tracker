@@ -3,6 +3,7 @@
 ## Unreleased
 
 ### Added
+- First-run setup wizard for profile, access mode, tracking start point, and initial scan.
 - Background update availability checks while the app is open.
 - Main-window update marker on the **Updates** action when a newer release is available.
 

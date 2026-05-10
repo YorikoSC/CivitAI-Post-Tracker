@@ -28,7 +28,7 @@ from collection_runtime import compute_collection_mode, normalize_collection_tra
 from collection_sync_state import ensure_collection_sync_schema, read_collection_sync_state, write_collection_sync_state
 from config_utils import normalize_config, normalize_poll_minutes, run_startup_self_check
 from engagement_dashboard import render_collection_tables_html
-from tracker_app import format_elapsed_time, format_next_run_time
+from tracker_app import build_first_run_config, format_elapsed_time, format_next_run_time
 from tracker_runner import TrackerRunner
 from tracker_service import (
     TimezoneHelper,
@@ -72,6 +72,77 @@ class DesktopStatusFormattingSmokeTests(unittest.TestCase):
         last_success = now - timedelta(minutes=4, seconds=30)
 
         self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
+
+
+class FirstRunConfigSmokeTests(unittest.TestCase):
+    def test_first_run_limited_mode_builds_valid_date_config(self) -> None:
+        cfg, materialized_key = build_first_run_config(
+            username="creator",
+            display_name="",
+            timezone_name="Europe/Moscow",
+            access_mode="limited",
+            api_key="",
+            api_key_file="api_key.txt",
+            start_mode="date",
+            start_post_value="",
+            start_day="10",
+            start_month="05",
+            start_year="2026",
+            poll_minutes="1",
+            start_auto_polling_on_launch=True,
+            check_updates_on_launch=True,
+        )
+
+        self.assertIsNone(materialized_key)
+        self.assertEqual(cfg["profile"]["display_name"], "creator")
+        self.assertEqual(cfg["auth"]["api_key"], "")
+        self.assertEqual(cfg["auth"]["api_key_file"], "")
+        self.assertEqual(cfg["tracking"]["start_date"], "2026-05-10")
+        self.assertEqual(cfg["tracking"]["poll_minutes"], 5)
+        self.assertTrue(cfg["options"]["start_auto_polling_on_launch"])
+
+    def test_first_run_api_key_mode_uses_file_storage_and_post_url(self) -> None:
+        cfg, materialized_key = build_first_run_config(
+            username="creator",
+            display_name="Creator Name",
+            timezone_name="UTC",
+            access_mode="api_key",
+            api_key="secret-key",
+            api_key_file="secrets/api_key.txt",
+            start_mode="post_id",
+            start_post_value="https://civitai.com/posts/12345",
+            start_day="",
+            start_month="",
+            start_year="",
+            poll_minutes="30",
+            start_auto_polling_on_launch=False,
+            check_updates_on_launch=False,
+        )
+
+        self.assertEqual(materialized_key, "secret-key")
+        self.assertEqual(cfg["auth"]["api_key"], "")
+        self.assertEqual(cfg["auth"]["api_key_file"], "secrets/api_key.txt")
+        self.assertEqual(cfg["tracking"]["start_post_id"], 12345)
+        self.assertFalse(cfg["options"]["check_updates_on_launch"])
+
+    def test_first_run_requires_valid_start_post(self) -> None:
+        with self.assertRaises(ValueError):
+            build_first_run_config(
+                username="creator",
+                display_name="",
+                timezone_name="UTC",
+                access_mode="limited",
+                api_key="",
+                api_key_file="api_key.txt",
+                start_mode="post_id",
+                start_post_value="not a post",
+                start_day="",
+                start_month="",
+                start_year="",
+                poll_minutes="15",
+                start_auto_polling_on_launch=False,
+                check_updates_on_launch=True,
+            )
 
 
 class TrackerRunnerRuntimeStatusSmokeTests(unittest.TestCase):
