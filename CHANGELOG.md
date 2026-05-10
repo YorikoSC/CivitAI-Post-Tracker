@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v10.4.1
 
 ### Added
 - Analysis-ready data export from the desktop app and CLI.
@@ -16,7 +16,7 @@
 - Dashboard smoke coverage for the Performance, Timing, and History boards plus card-to-detail-drawer wiring.
 
 ### Changed
-- Collection event storage and dashboard details now avoid personal collector/actor identifiers and keep only image/post target context.
+- Collection event storage and dashboard details now stay focused on image/post analytics and aggregate collection context.
 - Project documentation now focuses on current usage, with old release-body drafts removed from the active doc set.
 - Source-mode fallback launch scripts now fail with clearer setup guidance when Python or UI dependencies are missing.
 - `install_requirements.bat` now validates Python 3.11+, backs up unusable local environments, installs dependencies into `.venv`, and verifies CustomTkinter.
