@@ -185,7 +185,7 @@ Use **Export data** in the desktop app to write analysis-ready files to `analyti
 
 The export is UTF-8 CSV with comma separators and stable filenames. Timestamps are ISO 8601; UTC fields use `Z`, and local fields use the configured profile timezone. Unknown values are left blank.
 
-The export is meant for pandas, notebooks, or external analysis rather than dashboard viewing. It keeps post/image identifiers and collection counts, but does not export private collector or actor identifiers.
+The export is meant for external analysis rather than dashboard viewing. You can load it into pandas, spreadsheets, scripts, or an AI assistant to inspect posting history and growth patterns.
 
 From source mode, the same export can be generated without fetching new data:
 
