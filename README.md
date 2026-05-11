@@ -27,6 +27,7 @@ The source code is licensed under the MIT License. That license grants broad rig
 - Stores current reaction/comment totals and historical snapshots in SQLite.
 - Exports local CSV snapshots and a clean analytics CSV package.
 - Generates a local HTML dashboard with boards, tables, preview thumbnails, charts, and collection analytics.
+- Uses subtle motion in the desktop UI and dashboard, while respecting reduced-motion system/browser settings.
 - Tracks collection additions for your images when authenticated access is available.
 - Runs manual checks or automatic polling from a tray-enabled desktop UI.
 - Checks GitHub Releases for portable EXE updates and marks the Updates action when a newer version is available.
@@ -175,6 +176,8 @@ The dashboard is generated as `dashboard.html` and opened from the desktop app. 
 - collection activity cards, image queues, and collection context;
 - thumbnail previews and post detail drawer when image metadata is available.
 
+Dashboard motion is intentionally cosmetic. If Windows or the browser asks for reduced motion, animated transitions are reduced or disabled.
+
 See `DASHBOARD_GUIDE.md` for interpretation notes and known limits.
 
 ## Analytics Export
@@ -251,6 +254,8 @@ If collection tracking is empty, check that:
 - `logs\core_last.log` does not report `collection_ingest.reason: API key required`.
 
 If the dashboard looks stale, run the tracker again and check the `generated ...` timestamp in the dashboard header.
+
+If UI or dashboard animations are not visible, check Windows **Accessibility > Visual effects > Animation effects**. The app follows that setting where possible.
 
 ## Related Docs
 

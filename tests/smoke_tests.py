@@ -74,6 +74,22 @@ class DesktopStatusFormattingSmokeTests(unittest.TestCase):
         self.assertIn("4 min ago", format_elapsed_time(last_success, now=now))
 
 
+class DesktopMotionSmokeTests(unittest.TestCase):
+    def test_desktop_ui_has_motion_hooks(self) -> None:
+        source = (ROOT / "tracker_app.py").read_text(encoding="utf-8")
+
+        self.assertIn("desktop_motion_enabled", source)
+        self.assertIn("SPI_GETCLIENTAREAANIMATION", source)
+        self.assertIn("UI_FADE_DURATION_MS = 1500", source)
+        self.assertIn("animate_window_open(self)", source)
+        self.assertIn("animate_window_close", source)
+        self.assertIn("animate_window_refresh", source)
+        self.assertIn("_play_main_motion", source)
+        self.assertIn("animate_pack_widget(row", source)
+        self.assertIn("_pulse_updates_badge", source)
+        self.assertIn("_animate_current_settings_tab", source)
+
+
 class FirstRunConfigSmokeTests(unittest.TestCase):
     def test_first_run_limited_mode_builds_valid_date_config(self) -> None:
         cfg, materialized_key = build_first_run_config(
@@ -1078,6 +1094,20 @@ class DashboardSmokeTests(unittest.TestCase):
 
         self.assertIn("[hidden]{display:none!important}", rendered)
         self.assertIn(".thumb-missing[hidden]{display:none!important}", rendered)
+        self.assertIn("class='motion-ready'", rendered)
+        self.assertIn("motion-reveal", rendered)
+        self.assertIn("IntersectionObserver", rendered)
+        self.assertIn("captureMotion", rendered)
+        self.assertIn("playMotion", rendered)
+        self.assertIn("Element.prototype.animate", rendered)
+        self.assertIn("getBoundingClientRect", rendered)
+        self.assertIn("@media (prefers-reduced-motion:reduce)", rendered)
+        self.assertIn("dashboard-enter", rendered)
+        self.assertIn("dashboard-item-in", rendered)
+        self.assertIn("animateDashboardNumbers", rendered)
+        self.assertIn("Intl.NumberFormat", rendered)
+        self.assertIn("requestAnimationFrame", rendered)
+        self.assertIn("is-closing", rendered)
         self.assertIn("Visual overview", rendered)
         self.assertIn("Daily activity", rendered)
         self.assertIn("Reaction mix today", rendered)
