@@ -62,9 +62,10 @@ After building:
 5. Run **Run now**.
 6. Open the dashboard and confirm the `generated ...` timestamp changed.
 7. Confirm dashboard previews, workspace tabs, filters, and detail drawers render correctly.
-8. Confirm the main window Activity area and status footer are visible at the default size.
-9. Confirm Settings, Updates, and Diagnostics open with readable text.
-10. Check `logs\core_last.log` for fatal errors.
+8. With Windows animation effects enabled, confirm dashboard and desktop-window fade effects are visible.
+9. Confirm the main window Activity area and status footer are visible at the default size.
+10. Confirm Settings, Updates, and Diagnostics open with readable text.
+11. Check `logs\core_last.log` for fatal errors.
 
 When testing collection tracking, use a configured API key and confirm `collection_ingest.ok` is true or that any reported reason is expected.
 

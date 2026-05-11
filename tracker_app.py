@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import base64
 import ctypes
+import math
 import os
 import queue
 import re
@@ -143,6 +144,12 @@ STATUS_IDLE = "#9baacf"
 UPDATE_BADGE_BG = "#ef4444"
 UPDATE_CHECK_INTERVAL_SECONDS = 6 * 60 * 60
 UPDATE_CHECK_RETRY_SECONDS = 60 * 60
+MOTION_FRAME_MS = 16
+MOTION_DURATION_MS = 240
+MOTION_STAGGER_MS = 45
+UI_FADE_DURATION_MS = 1500
+SPI_GETANIMATION = 0x0048
+SPI_GETCLIENTAREAANIMATION = 0x1042
 CUSTOM_TK_AVAILABLE = ctk is not None
 AppRoot = ctk.CTk if CUSTOM_TK_AVAILABLE else tk.Tk
 DialogWindow = ctk.CTkToplevel if CUSTOM_TK_AVAILABLE else tk.Toplevel
@@ -696,6 +703,281 @@ def make_metric_tile(parent: tk.Misc, label: str, var: tk.StringVar, row: int, c
     return tile
 
 
+def desktop_motion_enabled() -> bool:
+    if not sys.platform.startswith("win"):
+        return True
+    try:
+        enabled = ctypes.c_bool()
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, ctypes.byref(enabled), 0):
+            return bool(enabled.value)
+    except Exception:
+        pass
+    try:
+        class AnimationInfo(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("iMinAnimate", ctypes.c_int)]
+
+        info = AnimationInfo(ctypes.sizeof(AnimationInfo), 0)
+        if ctypes.windll.user32.SystemParametersInfoW(SPI_GETANIMATION, ctypes.sizeof(info), ctypes.byref(info), 0):
+            return bool(info.iMinAnimate)
+    except Exception:
+        pass
+    return True
+
+
+def _motion_after(widget: tk.Misc, delay_ms: int, callback, *args) -> None:
+    try:
+        widget.after(delay_ms, lambda: _motion_dispatch(widget, callback, *args))
+    except tk.TclError:
+        pass
+
+
+def _motion_dispatch(widget: tk.Misc, callback, *args) -> None:
+    try:
+        if widget.winfo_exists():
+            callback(*args)
+    except tk.TclError:
+        return
+
+
+def _ease_out_cubic(progress: float) -> float:
+    progress = max(0.0, min(1.0, progress))
+    return 1 - (1 - progress) ** 3
+
+
+def _pad_pair(value) -> tuple[int, int]:
+    if isinstance(value, (tuple, list)):
+        if len(value) >= 2:
+            return int(float(value[0] or 0)), int(float(value[1] or 0))
+        if len(value) == 1:
+            item = int(float(value[0] or 0))
+            return item, item
+    if isinstance(value, str):
+        parts = value.split()
+        if len(parts) >= 2:
+            return int(float(parts[0] or 0)), int(float(parts[1] or 0))
+        if len(parts) == 1:
+            item = int(float(parts[0] or 0))
+            return item, item
+    item = int(float(value or 0))
+    return item, item
+
+
+def _lerp_int(start: int, end: int, progress: float) -> int:
+    return int(round(start + (end - start) * progress))
+
+
+def _hex_to_rgb(color: str) -> tuple[int, int, int]:
+    color = color.strip().lstrip("#")
+    if len(color) != 6:
+        return (38, 51, 83)
+    return int(color[0:2], 16), int(color[2:4], 16), int(color[4:6], 16)
+
+
+def _blend_hex(start: str, end: str, progress: float) -> str:
+    start_rgb = _hex_to_rgb(start)
+    end_rgb = _hex_to_rgb(end)
+    blended = tuple(_lerp_int(start_rgb[idx], end_rgb[idx], progress) for idx in range(3))
+    return "#{:02x}{:02x}{:02x}".format(*blended)
+
+
+def _set_border_color(widget: tk.Misc, color: str) -> None:
+    try:
+        widget.configure(highlightbackground=color)
+    except tk.TclError:
+        pass
+    try:
+        widget.configure(border_color=color)
+    except tk.TclError:
+        pass
+
+
+def _set_alpha(widget: tk.Misc, value: float) -> bool:
+    try:
+        widget.attributes("-alpha", max(0.0, min(1.0, value)))
+        return True
+    except Exception:
+        return False
+
+
+def _animate_window_alpha(
+    window: tk.Misc,
+    *,
+    start_alpha: float,
+    end_alpha: float,
+    duration_ms: int,
+    on_complete=None,
+) -> None:
+    if not desktop_motion_enabled():
+        _set_alpha(window, end_alpha)
+        if on_complete:
+            on_complete()
+        return
+    if not _set_alpha(window, start_alpha):
+        if on_complete:
+            on_complete()
+        return
+
+    token = int(getattr(window, "_desktop_alpha_motion_token", 0) or 0) + 1
+    try:
+        setattr(window, "_desktop_alpha_motion_token", token)
+    except Exception:
+        pass
+    steps = max(1, duration_ms // MOTION_FRAME_MS)
+
+    def step(index: int = 0):
+        if getattr(window, "_desktop_alpha_motion_token", token) != token:
+            return
+        progress = _ease_out_cubic(index / steps)
+        alpha = start_alpha + ((end_alpha - start_alpha) * progress)
+        if not _set_alpha(window, alpha):
+            return
+        if index < steps:
+            _motion_after(window, MOTION_FRAME_MS, step, index + 1)
+        else:
+            _set_alpha(window, end_alpha)
+            if on_complete:
+                on_complete()
+
+    _motion_after(window, 10, step, 0)
+
+
+def animate_window_open(window: tk.Misc, *, duration_ms: int = UI_FADE_DURATION_MS) -> None:
+    try:
+        setattr(window, "_desktop_fade_closing", False)
+    except Exception:
+        pass
+    _animate_window_alpha(window, start_alpha=0.0, end_alpha=1.0, duration_ms=duration_ms)
+
+
+def animate_window_refresh(window: tk.Misc, *, duration_ms: int = UI_FADE_DURATION_MS) -> None:
+    if getattr(window, "_desktop_fade_closing", False):
+        return
+    _animate_window_alpha(window, start_alpha=0.86, end_alpha=1.0, duration_ms=duration_ms)
+
+
+def animate_window_close(window: tk.Misc, on_complete=None, *, duration_ms: int = UI_FADE_DURATION_MS) -> None:
+    if getattr(window, "_desktop_fade_closing", False):
+        return
+    try:
+        setattr(window, "_desktop_fade_closing", True)
+    except Exception:
+        pass
+
+    def finish():
+        if on_complete is None:
+            try:
+                window.destroy()
+            except tk.TclError:
+                pass
+        else:
+            on_complete()
+
+    _animate_window_alpha(window, start_alpha=1.0, end_alpha=0.0, duration_ms=duration_ms, on_complete=finish)
+
+
+def animate_grid_widget(
+    widget: tk.Misc,
+    *,
+    delay_ms: int = 0,
+    offset_y: int = 16,
+    duration_ms: int = MOTION_DURATION_MS,
+    highlight: bool = True,
+) -> None:
+    if not desktop_motion_enabled():
+        return
+    try:
+        info = widget.grid_info()
+    except tk.TclError:
+        return
+    if not info:
+        return
+    final_pady = _pad_pair(info.get("pady", 0))
+    start_pady = (final_pady[0] + offset_y, final_pady[1])
+    _set_border_color(widget, ACCENT_HOVER_BG if highlight else BORDER_FG)
+    try:
+        widget.grid_configure(pady=start_pady)
+    except tk.TclError:
+        return
+
+    steps = max(1, duration_ms // MOTION_FRAME_MS)
+
+    def step(index: int = 0):
+        progress = _ease_out_cubic(index / steps)
+        top = _lerp_int(start_pady[0], final_pady[0], progress)
+        try:
+            widget.grid_configure(pady=(top, final_pady[1]))
+        except tk.TclError:
+            return
+        if highlight:
+            _set_border_color(widget, _blend_hex(ACCENT_HOVER_BG, BORDER_FG, progress))
+        if index < steps:
+            _motion_after(widget, MOTION_FRAME_MS, step, index + 1)
+        else:
+            try:
+                widget.grid_configure(pady=final_pady)
+            except tk.TclError:
+                pass
+            if highlight:
+                _set_border_color(widget, BORDER_FG)
+
+    _motion_after(widget, delay_ms, step, 0)
+
+
+def animate_pack_widget(
+    widget: tk.Misc,
+    *,
+    delay_ms: int = 0,
+    offset_x: int = 18,
+    duration_ms: int = MOTION_DURATION_MS,
+    highlight: bool = True,
+) -> None:
+    if not desktop_motion_enabled():
+        return
+    try:
+        info = widget.pack_info()
+    except tk.TclError:
+        return
+    if not info:
+        return
+    final_padx = _pad_pair(info.get("padx", 0))
+    start_padx = (final_padx[0] + offset_x, final_padx[1])
+    _set_border_color(widget, ACCENT_HOVER_BG if highlight else BORDER_FG)
+    try:
+        widget.pack_configure(padx=start_padx)
+    except tk.TclError:
+        return
+
+    steps = max(1, duration_ms // MOTION_FRAME_MS)
+
+    def step(index: int = 0):
+        progress = _ease_out_cubic(index / steps)
+        left = _lerp_int(start_padx[0], final_padx[0], progress)
+        try:
+            widget.pack_configure(padx=(left, final_padx[1]))
+        except tk.TclError:
+            return
+        if highlight:
+            _set_border_color(widget, _blend_hex(ACCENT_HOVER_BG, BORDER_FG, progress))
+        if index < steps:
+            _motion_after(widget, MOTION_FRAME_MS, step, index + 1)
+        else:
+            try:
+                widget.pack_configure(padx=final_padx)
+            except tk.TclError:
+                pass
+            if highlight:
+                _set_border_color(widget, BORDER_FG)
+
+    _motion_after(widget, delay_ms, step, 0)
+
+
+def animate_grid_children(parent: tk.Misc, *, delay_ms: int = 0, stagger_ms: int = MOTION_STAGGER_MS) -> None:
+    if not desktop_motion_enabled():
+        return
+    for index, child in enumerate(parent.winfo_children()):
+        animate_grid_widget(child, delay_ms=delay_ms + index * stagger_ms, offset_y=10, duration_ms=190, highlight=False)
+
+
 def extract_post_id(value: str) -> int | None:
     value = value.strip()
     if value.isdigit():
@@ -895,13 +1177,15 @@ class SettingsDialog(DialogWindow):
         self.html_var = tk.StringVar(value=deep_get(config, "paths.html", "dashboard.html"))
 
         self.status_var = tk.StringVar(value="Review settings, then save changes.")
+        self._settings_tab_frames: dict[str, tk.Misc] = {}
 
         self._build()
         self._toggle_auth_mode()
         self._toggle_start_mode()
         self.transient(master)
         self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        animate_window_open(self)
 
     def _build(self):
         set_surface_color(self, APP_BG)
@@ -934,6 +1218,7 @@ class SettingsDialog(DialogWindow):
             )
         else:
             notebook = ttk.Notebook(container)
+        self.settings_notebook = notebook
         notebook.grid(row=1, column=0, sticky="nsew", pady=(16, 0))
 
         self.profile_tab = self._make_tab(notebook, "Profile")
@@ -947,6 +1232,12 @@ class SettingsDialog(DialogWindow):
                 notebook._segmented_button.configure(font=ui_font(12))
             except Exception:
                 pass
+            try:
+                notebook.configure(command=self._animate_current_settings_tab)
+            except Exception:
+                pass
+        else:
+            notebook.bind("<<NotebookTabChanged>>", lambda _event: self._animate_current_settings_tab())
 
         self._build_profile_tab()
         self._build_auth_tab()
@@ -961,7 +1252,7 @@ class SettingsDialog(DialogWindow):
         tk.Label(footer, textvariable=self.status_var, bg=APP_BG, fg=SUBTEXT_FG, font=ui_font(12), wraplength=620, justify="left").grid(row=0, column=0, sticky="w")
         buttons = tk.Frame(footer, bg=APP_BG)
         buttons.grid(row=0, column=1, sticky="e")
-        make_button(buttons, "Cancel", self.destroy).pack(side="left", padx=(0, 8))
+        make_button(buttons, "Cancel", self._close).pack(side="left", padx=(0, 8))
         make_button(buttons, "Save", self._save, kind="primary").pack(side="left")
 
     def _make_tab(self, notebook, title: str) -> tk.Frame:
@@ -980,7 +1271,29 @@ class SettingsDialog(DialogWindow):
             frame = tk.Frame(notebook, bg=CARD_BG, padx=18, pady=18, highlightthickness=1, highlightbackground=BORDER_FG)
             notebook.add(frame, text=title)
         frame.columnconfigure(1, weight=1)
+        self._settings_tab_frames[title] = frame
         return frame
+
+    def _animate_current_settings_tab(self):
+        if not desktop_motion_enabled() or not hasattr(self, "settings_notebook"):
+            return
+        frame = None
+        if CUSTOM_TK_AVAILABLE:
+            try:
+                frame = self._settings_tab_frames.get(self.settings_notebook.get())
+            except Exception:
+                frame = None
+        else:
+            try:
+                selected = self.settings_notebook.select()
+                frame = self.settings_notebook.nametowidget(selected)
+            except Exception:
+                frame = None
+        if frame is not None:
+            animate_window_refresh(self)
+
+    def _close(self):
+        animate_window_close(self)
 
     def _add_section_intro(self, parent: tk.Frame, row: int, title: str, text: str) -> int:
         tk.Label(parent, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(11, "bold")).grid(row=row, column=0, columnspan=2, sticky="w")
@@ -1242,7 +1555,7 @@ class SettingsDialog(DialogWindow):
         )
         self.status_var.set("Settings saved successfully.")
         self.on_save(cfg)
-        self.destroy()
+        self._close()
 
 
 class SetupWizardDialog(DialogWindow):
@@ -1257,6 +1570,7 @@ class SetupWizardDialog(DialogWindow):
         self.base_dir = base_dir
         self.on_save = on_save
         self.step = 0
+        self._initial_render = True
 
         self.username_var = tk.StringVar(value=deep_get(config, "profile.username", ""))
         self.display_name_var = tk.StringVar(value=deep_get(config, "profile.display_name", ""))
@@ -1306,7 +1620,8 @@ class SetupWizardDialog(DialogWindow):
         self._build()
         self.transient(master)
         self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        animate_window_open(self)
 
     def _build(self):
         set_surface_color(self, APP_BG)
@@ -1339,7 +1654,7 @@ class SetupWizardDialog(DialogWindow):
         buttons.grid(row=0, column=1, sticky="e")
         self.back_btn = make_button(buttons, "Back", self._back)
         self.back_btn.pack(side="left", padx=(0, 8))
-        make_button(buttons, "Cancel", self.destroy).pack(side="left", padx=(0, 8))
+        make_button(buttons, "Cancel", self._close).pack(side="left", padx=(0, 8))
         self.next_btn = make_button(buttons, "Next", self._next, kind="primary")
         self.next_btn.pack(side="left")
 
@@ -1363,6 +1678,13 @@ class SetupWizardDialog(DialogWindow):
         )
         builders[self.step]()
         self._update_footer()
+        if self._initial_render:
+            self._initial_render = False
+        else:
+            animate_window_refresh(self)
+
+    def _close(self):
+        animate_window_close(self)
 
     def _update_footer(self):
         self.back_btn.configure(state=("normal" if self.step > 0 else "disabled"))
@@ -1681,7 +2003,7 @@ class SetupWizardDialog(DialogWindow):
         materialize_api_key(cfg, materialized_key, self.base_dir)
         self.status_var.set("Setup saved successfully.")
         self.on_save(cfg, bool(self.run_first_scan_var.get()))
-        self.destroy()
+        self._close()
 
 
 class DiagnosticsDialog(DialogWindow):
@@ -1696,7 +2018,8 @@ class DiagnosticsDialog(DialogWindow):
         self._build()
         self.transient(master)
         self.grab_set()
-        self.protocol("WM_DELETE_WINDOW", self.destroy)
+        self.protocol("WM_DELETE_WINDOW", self._close)
+        animate_window_open(self)
 
     def _build(self):
         set_surface_color(self, APP_BG)
@@ -1748,7 +2071,10 @@ class DiagnosticsDialog(DialogWindow):
         buttons = tk.Frame(wrapper, bg=APP_BG)
         buttons.grid(row=4, column=0, sticky="ew", pady=(10, 0))
         make_button(buttons, "Copy to clipboard", self._copy).pack(side="left")
-        make_button(buttons, "Close", self.destroy, kind="primary").pack(side="right")
+        make_button(buttons, "Close", self._close, kind="primary").pack(side="right")
+
+    def _close(self):
+        animate_window_close(self)
 
     def _build_check_tiles(self, parent: tk.Frame):
         details = self.report.get("details", {})
@@ -1838,6 +2164,7 @@ class UpdateDialog(DialogWindow):
         self.grab_set()
         self.protocol("WM_DELETE_WINDOW", self._close)
         self.check_after_id = self._schedule(150, self.check_now)
+        animate_window_open(self)
 
     def _schedule(self, delay_ms: int, callback, *args):
         after_id = ""
@@ -1944,7 +2271,7 @@ class UpdateDialog(DialogWindow):
         self.close_btn.grid(row=1, column=3, sticky="ew", padx=(6, 0), pady=(6, 0))
 
     def _close(self):
-        self.destroy()
+        animate_window_close(self)
 
     def _set_update_path(self, source: str, path: str, hint: str | None = None):
         self.source_var.set(source)
@@ -2273,6 +2600,12 @@ class TrackerApp(AppRoot):
         self.update_check_after_id: str | None = None
         self.latest_update_info: UpdateInfo | None = None
         self.update_available = False
+        self.desktop_motion_enabled = desktop_motion_enabled()
+        if self.desktop_motion_enabled:
+            _set_alpha(self, 0.0)
+        self._main_motion_widgets: list[tk.Misc] = []
+        self._updates_badge_pulse_step = 0
+        self._updates_badge_pulse_active = False
         self._build_ui()
         self._schedule(400, self._pump_logs)
         self._schedule(1000, self._refresh_status)
@@ -2374,6 +2707,7 @@ class TrackerApp(AppRoot):
         self._build_actions_card(body)
         self._build_health_card(body)
         self._build_log_card(body)
+        self._schedule(120, self._play_main_motion)
 
     def _make_card(self, parent, title: str, row: int, column: int, *, columnspan: int = 1, weight: int = 0):
         frame = tk.Frame(parent, bg=CARD_BG, padx=14, pady=14, highlightthickness=1, highlightbackground=BORDER_FG)
@@ -2381,7 +2715,15 @@ class TrackerApp(AppRoot):
         if weight:
             parent.grid_rowconfigure(row, weight=weight)
         tk.Label(frame, text=title, bg=CARD_BG, fg=SUBTEXT_FG, font=ui_font(12, "bold")).pack(anchor="w")
+        self._main_motion_widgets.append(frame)
         return frame
+
+    def _register_main_motion_widget(self, widget: tk.Misc) -> tk.Misc:
+        self._main_motion_widgets.append(widget)
+        return widget
+
+    def _play_main_motion(self):
+        return
 
     def _build_status_card(self, parent):
         card = self._make_card(parent, "CURRENT STATE", 0, 0)
@@ -2422,6 +2764,7 @@ class TrackerApp(AppRoot):
         tile.grid(row=row, column=column, sticky="nsew", padx=(0 if column == 0 else 6, 0 if column == 1 else 6), pady=0)
         tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
         tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(12), wraplength=260, justify="left").pack(anchor="w", pady=(3, 0))
+        self._register_main_motion_widget(tile)
 
     def _build_actions_card(self, parent):
         card = self._make_card(parent, "ACTIONS", 0, 1)
@@ -2438,7 +2781,7 @@ class TrackerApp(AppRoot):
         self.updates_btn = make_button(self.updates_slot, "Updates", self.open_updates)
         self.updates_btn.pack(fill="both", expand=True)
         self.updates_badge = tk.Canvas(self.updates_slot, width=12, height=12, bg=CARD_BG, highlightthickness=0, borderwidth=0)
-        self.updates_badge.create_oval(2, 2, 10, 10, fill=UPDATE_BADGE_BG, outline=UPDATE_BADGE_BG)
+        self.updates_badge_oval = self.updates_badge.create_oval(2, 2, 10, 10, fill=UPDATE_BADGE_BG, outline=UPDATE_BADGE_BG)
         self.updates_badge.place_forget()
         self.diagnostics_btn = make_button(actions, "Diagnostics", self.open_diagnostics)
         self.data_btn = make_button(actions, "Data folder", self.open_data_folder)
@@ -2463,6 +2806,7 @@ class TrackerApp(AppRoot):
         ]
         for btn, row, column, columnspan in layout:
             btn.grid(row=row, column=column, columnspan=columnspan, sticky="ew", padx=4, pady=4)
+            self._register_main_motion_widget(btn)
 
     def _build_health_card(self, parent):
         card = self._make_card(parent, "RUN HEALTH", 1, 0, columnspan=2)
@@ -2480,6 +2824,7 @@ class TrackerApp(AppRoot):
             tile.grid(row=0, column=idx, sticky="nsew", padx=(0 if idx == 0 else 5, 0 if idx == len(items) - 1 else 5))
             tk.Label(tile, text=label, bg=CARD_ALT_BG, fg=SUBTEXT_FG, font=ui_font(10, "bold")).pack(anchor="w")
             tk.Label(tile, textvariable=var, bg=CARD_ALT_BG, fg=HEADER_FG, font=ui_font(12), wraplength=200, justify="left").pack(anchor="w", pady=(4, 0))
+            self._register_main_motion_widget(tile)
 
     def _build_log_card(self, parent):
         card = self._make_card(parent, "ACTIVITY", 2, 0, columnspan=2, weight=3)
@@ -2573,6 +2918,7 @@ class TrackerApp(AppRoot):
         ).grid(row=0, column=1, sticky="ew")
 
         self.activity_items.append(row)
+        animate_pack_widget(row, offset_x=18, duration_ms=220)
         while len(self.activity_items) > 60:
             old = self.activity_items.pop(0)
             old.destroy()
@@ -2642,10 +2988,38 @@ class TrackerApp(AppRoot):
         try:
             if visible:
                 self.updates_badge.place(relx=1.0, x=-8, y=7, anchor="ne")
+                self._start_updates_badge_pulse()
             else:
                 self.updates_badge.place_forget()
+                self._updates_badge_pulse_active = False
         except tk.TclError:
             pass
+
+    def _start_updates_badge_pulse(self):
+        if not self.desktop_motion_enabled or not self.update_available:
+            return
+        if self._updates_badge_pulse_active:
+            return
+        self._updates_badge_pulse_active = True
+        self._updates_badge_pulse_step = 0
+        self._pulse_updates_badge()
+
+    def _pulse_updates_badge(self):
+        if not self.desktop_motion_enabled or not self.update_available:
+            self._updates_badge_pulse_active = False
+            return
+        if not hasattr(self, "updates_badge") or not hasattr(self, "updates_badge_oval"):
+            self._updates_badge_pulse_active = False
+            return
+        self._updates_badge_pulse_step += 1
+        phase = (math.sin(self._updates_badge_pulse_step / 2.0) + 1) / 2
+        inset = 1.2 + phase * 1.2
+        try:
+            self.updates_badge.coords(self.updates_badge_oval, inset, inset, 12 - inset, 12 - inset)
+        except tk.TclError:
+            self._updates_badge_pulse_active = False
+            return
+        self._schedule(140, self._pulse_updates_badge)
 
     def run_now(self):
         threading.Thread(target=self.runner.run_once, daemon=True).start()
@@ -2898,18 +3272,30 @@ class TrackerApp(AppRoot):
 
     def hide_to_tray(self):
         if self._ensure_tray():
-            self.withdraw()
-            self.runner.set_app_mode("tray")
-            self._enqueue_log("App hidden to tray.")
+            def finish():
+                try:
+                    self.withdraw()
+                except tk.TclError:
+                    return
+                self.runner.set_app_mode("tray")
+                self._enqueue_log("App hidden to tray.")
+
+            animate_window_close(self, finish)
         else:
+            _set_alpha(self, 1.0)
             self.iconify()
 
     def show_from_tray(self):
+        try:
+            setattr(self, "_desktop_fade_closing", False)
+        except Exception:
+            pass
         self.deiconify()
         try:
             self.state("normal")
         except Exception:
             pass
+        animate_window_open(self)
         self._force_show_main_window()
         self.runner.set_app_mode("window")
         self._schedule(50, self.lift)
@@ -2959,7 +3345,14 @@ class TrackerApp(AppRoot):
                 self.tray_icon.stop()
             except Exception:
                 pass
-        self.destroy()
+
+        def finish():
+            try:
+                self.destroy()
+            except tk.TclError:
+                pass
+
+        animate_window_close(self, finish)
 
 
 def build_parser():

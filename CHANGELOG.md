@@ -2,8 +2,12 @@
 
 ## Unreleased
 
+## v10.6.0
+
 ### Added
 - Dashboard motion for cards, charts, numeric counters, workspace switches, hover states, and the detail drawer.
+- Desktop UI fade-in/fade-out for the main window, setup wizard, settings, diagnostics, and update dialogs, with a subtle activity-feed and update-badge motion.
+- Scroll-reveal and workspace reflow animation for dashboard sections, cards, and filtered rows.
 - Reduced-motion handling so users who disable motion get a static dashboard.
 
 ## v10.5.0

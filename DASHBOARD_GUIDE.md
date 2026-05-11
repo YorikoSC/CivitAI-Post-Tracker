@@ -20,6 +20,8 @@ The chart area shows:
 
 Charts are rendered inside the generated HTML and do not require external scripts.
 
+Dashboard motion is visual polish only. Cards, charts, workspace switches, filters, and the detail drawer may animate when the browser allows motion.
+
 ### Suggested Posting Windows
 
 Suggested windows are calculated from historical performance. Treat them as hints, not rules. Small samples, unusual posts, content mix changes, and platform behavior can skew the result.
@@ -127,6 +129,8 @@ Dashboard periods use the configured local timezone.
 The header includes a `generated ...` timestamp. If the dashboard looks stale, run the tracker again and confirm that timestamp changed.
 
 The dashboard page auto-refreshes itself every 5 minutes. This reloads the local HTML view; it does not trigger a tracker run or fetch new CivitAI data. Background polling is controlled by the app's polling interval.
+
+If dashboard motion is not visible, check Windows **Accessibility > Visual effects > Animation effects** and the browser's reduced-motion setting. The dashboard intentionally reduces animation when reduced motion is requested.
 
 ## Raw Export
 
