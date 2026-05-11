@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## v10.5.0
 
 ### Added
 - First-run setup wizard for profile, access mode, tracking start point, and initial scan.
