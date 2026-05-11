@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Added
-- Subtle dashboard motion for cards, charts, workspace switches, hover states, and the detail drawer.
+- Dashboard motion for cards, charts, numeric counters, workspace switches, hover states, and the detail drawer.
 - Reduced-motion handling so users who disable motion get a static dashboard.
 
 ## v10.5.0
