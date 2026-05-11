@@ -1078,6 +1078,11 @@ class DashboardSmokeTests(unittest.TestCase):
 
         self.assertIn("[hidden]{display:none!important}", rendered)
         self.assertIn(".thumb-missing[hidden]{display:none!important}", rendered)
+        self.assertIn("class='motion-ready'", rendered)
+        self.assertIn("@media (prefers-reduced-motion:reduce)", rendered)
+        self.assertIn("dashboard-enter", rendered)
+        self.assertIn("requestAnimationFrame", rendered)
+        self.assertIn("is-closing", rendered)
         self.assertIn("Visual overview", rendered)
         self.assertIn("Daily activity", rendered)
         self.assertIn("Reaction mix today", rendered)
