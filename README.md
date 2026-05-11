@@ -63,13 +63,15 @@ Install dependencies:
 .\install_requirements.bat
 ```
 
-Create `config.json` from `config.example.json`, then launch:
+Launch the app:
 
 ```powershell
 .\launch_tracker.pyw
 ```
 
 On a new app folder, the desktop UI opens a first-run setup wizard for profile, access mode, tracking start point, and the optional first scan.
+
+For advanced or headless setup, copy `config.example.json` to `config.json` and edit it before launch.
 
 For fallback startup with console diagnostics:
 
@@ -111,7 +113,9 @@ The package is written to `release\CivitAITracker-v<version>-win64.zip`.
 
 ## Configuration Basics
 
-The first-run wizard covers the required fields for normal use. The same values live in `config.json`, and advanced options can be edited there or from **Settings**:
+The first-run wizard covers the required fields for normal use. The same values live in `config.json`, and common options can be edited later from **Settings**.
+
+Most-used config keys:
 
 ```json
 {
@@ -139,9 +143,9 @@ The first-run wizard covers the required fields for normal use. The same values 
 }
 ```
 
-Collection tracking options are under `collection_tracking`. The default config separates the first bootstrap sync from later maintenance syncs:
-
 Automatic polling is intentionally conservative. The default is 15 minutes, and values below 5 minutes are raised to 5 minutes to avoid overly frequent CivitAI requests. Dashboard auto-refresh reloads the local HTML page every 5 minutes; it does not start a new CivitAI fetch by itself.
+
+Collection tracking options are under `collection_tracking`. The default config separates the first bootstrap sync from later maintenance syncs:
 
 ```json
 {
@@ -155,8 +159,6 @@ Automatic polling is intentionally conservative. The default is 15 minutes, and 
   }
 }
 ```
-
-Legacy config keys are normalized at load time. New configs should use `options.enable_collection_tracking`.
 
 ## Dashboard
 
@@ -187,7 +189,7 @@ Use **Export data** in the desktop app to write analysis-ready files to `analyti
 
 The export is UTF-8 CSV with comma separators and stable filenames. Timestamps are ISO 8601; UTC fields use `Z`, and local fields use the configured profile timezone. Unknown values are left blank.
 
-The export is meant for external analysis rather than dashboard viewing. You can load it into pandas, spreadsheets, scripts, or an AI assistant to inspect posting history and growth patterns.
+The export is meant for external analysis rather than dashboard viewing. You can load it into pandas, spreadsheets, scripts, or other analysis tools to inspect posting history and growth patterns.
 
 View-count columns are present for schema stability, but the CivitAI source currently used by the tracker does not provide view counts, so those fields are blank. Tags and image metadata are filled only when the current source returns them; image metadata is refreshed during normal tracker runs.
 
@@ -207,15 +209,7 @@ When update checks are enabled, the app checks in the background on launch and p
 
 The updater preserves local runtime data and stores replaced app files under `updates\backup-<timestamp>\`. Keep your own backup of `config.json`, `api_key.txt`, and `civitai_tracker.db` before major updates.
 
-If GitHub Release assets are unavailable on your network, a release can provide a direct mirror URL in its notes:
-
-```text
-Update package mirror: https://example.com/CivitAITracker-v<version>-win64.zip
-```
-
-When a mirror line is present, the EXE Update Center prefers that package URL over GitHub Release assets.
-
-See `UPDATE_GUIDE.md` for update, rollback, and release-package details.
+See `UPDATE_GUIDE.md` for update, rollback, mirror, and release-package details.
 
 ## Local Data And Privacy
 
